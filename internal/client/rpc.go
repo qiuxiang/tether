@@ -28,7 +28,14 @@ func NewMsgID() string {
 }
 
 func (r *RPC) Register(msgID string) chan *protocol.Reply {
-	ch := make(chan *protocol.Reply, 1)
+	return r.RegisterBuf(msgID, 1)
+}
+
+// RegisterBuf is like Register but allows specifying the channel buffer size.
+// Use size ≥ 2 when the hub will deliver multiple Reply frames on the same
+// msg_id (e.g. upload: ok-to-send + final).
+func (r *RPC) RegisterBuf(msgID string, size int) chan *protocol.Reply {
+	ch := make(chan *protocol.Reply, size)
 	r.mu.Lock()
 	r.replies[msgID] = ch
 	r.mu.Unlock()
@@ -78,5 +85,31 @@ func (r *RPC) Deliver(msg protocol.Message) {
 			close(ch)
 			r.Unregister(m.MsgID)
 		}
+	case *protocol.FileChunk:
+		r.mu.Lock()
+		ch, ok := r.streams[m.MsgID]
+		r.mu.Unlock()
+		if ok {
+			ch <- m
+			if m.EOF {
+				close(ch)
+				r.Unregister(m.MsgID)
+			}
+		}
+	case *protocol.FileAbort:
+		r.mu.Lock()
+		ch, ok := r.streams[m.MsgID]
+		r.mu.Unlock()
+		if ok {
+			ch <- m
+			close(ch)
+			r.Unregister(m.MsgID)
+		}
 	}
+}
+
+// RegisterStreamRaw is an alias for RegisterStream — kept for naming
+// clarity in callers that consume FileChunk/FileAbort streams.
+func (r *RPC) RegisterStreamRaw(msgID string) chan protocol.Message {
+	return r.RegisterStream(msgID)
 }

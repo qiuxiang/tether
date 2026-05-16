@@ -16,6 +16,7 @@ type Server struct {
 func NewMCPServer(c *Conn) *Server {
 	s := &Server{conn: c, mcp: server.NewMCPServer("tether", "0.1.0")}
 	registerExecTools(s.mcp, c)
+	registerFileTool(s.mcp, c)
 	return s
 }
 
