@@ -87,7 +87,9 @@ func (c *Conn) Run(ctx context.Context) {
 func (c *Conn) dial(ctx context.Context) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	ws, _, err := websocket.Dial(dialCtx, c.cfg.HubURL, nil)
+	ws, _, err := websocket.Dial(dialCtx, c.cfg.HubURL, &websocket.DialOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return err
 	}

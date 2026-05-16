@@ -73,6 +73,41 @@ func TestHelloHandshakeDuplicateHostname(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestClientHandshakeWithCompression(t *testing.T) {
+	s := NewServer(Options{Token: "tk"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	wsURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
+	require.NoError(t, err)
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	// Verify the server negotiated permessage-deflate by inspecting the
+	// upgrade response header.
+	require.Contains(t, resp.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate",
+		"expected server to negotiate permessage-deflate")
+
+	hello := &protocol.Hello{Hostname: "smoke", Token: "tk", Role: "client"}
+	raw, _ := protocol.Encode(hello)
+	require.NoError(t, c.Write(ctx, websocket.MessageBinary, raw))
+
+	// Sanity round-trip: ListDevices → Reply
+	raw, _ = protocol.Encode(&protocol.ListDevices{MsgID: "1"})
+	require.NoError(t, c.Write(ctx, websocket.MessageBinary, raw))
+	_, data, err := c.Read(ctx)
+	require.NoError(t, err)
+	msg, err := protocol.Decode(data)
+	require.NoError(t, err)
+	reply := msg.(*protocol.Reply)
+	require.True(t, reply.OK)
+}
+
 func TestClientHandshake(t *testing.T) {
 	s := NewServer(Options{Token: "tk"})
 	ts := httptest.NewServer(s.Handler())

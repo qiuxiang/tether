@@ -22,7 +22,10 @@ func newClientID() string {
 }
 
 func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+		CompressionMode:    websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return
 	}

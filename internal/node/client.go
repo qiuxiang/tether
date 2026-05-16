@@ -103,7 +103,9 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(dialCtx, url, nil)
+	conn, _, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return err
 	}
