@@ -63,7 +63,24 @@ The `tether mcp` subcommand runs a stdio MCP server that connects to the hub.
 }
 ```
 
-7 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `get_output`, `send_stdin`, `kill_process`.
+8 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `get_output`, `send_stdin`, `kill_process`, `file_transfer`.
+
+### file_transfer
+
+Single-file transfers between the local machine and a node, between two nodes, or within a node:
+
+```
+file_transfer(from, to, overwrite=false)
+```
+
+Path syntax:
+
+- `node:/abs/path` or `node:~/path` — a path on that node.
+- `/abs/path` or `~/path` — a path on the machine running `tether mcp` (Claude Code's host).
+
+Returns `{ok, bytes, sha256, duration_ms}` on success, or `{ok:false, error:"..."}` on failure.
+
+Single file only — directories are not supported (use tar/zip on the source first). Default behavior refuses to overwrite an existing destination.
 
 ## Service files
 
