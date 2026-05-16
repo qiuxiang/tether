@@ -3,7 +3,6 @@ package node
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -189,10 +188,142 @@ func (h *FileHandler) handleAbort(m *protocol.FileAbort) {
 	h.mu.Unlock()
 }
 
-// handleGetOpen and handleLocalCopy are added in P2-T3.
-func (h *FileHandler) handleGetOpen(send Sender, m *protocol.FileGetOpen)     {}
-func (h *FileHandler) handleLocalCopy(send Sender, m *protocol.FileLocalCopy) {}
+const fileChunkSize = 256 * 1024
 
-// Silence unused-import errors until P2-T3 wires io/errors uses.
-var _ = io.Copy
-var _ = errors.New
+func (h *FileHandler) handleGetOpen(send Sender, m *protocol.FileGetOpen) {
+	path, err := expandPath(m.Path)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "path_not_found"})
+			return
+		}
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	if h.MaxFileSize > 0 && fi.Size() > h.MaxFileSize {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "size_limit_exceeded"})
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+
+	// Send metadata reply first (receiver computes its own sha).
+	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
+		"size": fi.Size(),
+		"mode": uint32(fi.Mode().Perm()),
+	}})
+
+	// Register cancel chan for handleAbort.
+	cancelCh := make(chan struct{})
+	h.mu.Lock()
+	h.downloads[m.MsgID] = &downloadState{cancel: cancelCh}
+	h.mu.Unlock()
+
+	go func() {
+		defer f.Close()
+		defer func() {
+			h.mu.Lock()
+			delete(h.downloads, m.MsgID)
+			h.mu.Unlock()
+		}()
+		buf := make([]byte, fileChunkSize)
+		var seq int64
+		for {
+			select {
+			case <-cancelCh:
+				send.Send(&protocol.FileAbort{MsgID: m.MsgID, Error: "cancelled"})
+				return
+			default:
+			}
+			n, rerr := f.Read(buf)
+			if n > 0 {
+				eof := rerr == io.EOF
+				err := send.Send(&protocol.FileChunk{
+					MsgID: m.MsgID, Seq: seq, Data: append([]byte(nil), buf[:n]...), EOF: eof,
+				})
+				if err != nil {
+					return
+				}
+				seq++
+				if eof {
+					return
+				}
+			}
+			if rerr == io.EOF {
+				// Zero-byte file: still need to send EOF frame.
+				_ = send.Send(&protocol.FileChunk{MsgID: m.MsgID, Seq: seq, EOF: true})
+				return
+			}
+			if rerr != nil {
+				send.Send(&protocol.FileAbort{MsgID: m.MsgID, Error: rerr.Error()})
+				return
+			}
+		}
+	}()
+}
+
+func (h *FileHandler) handleLocalCopy(send Sender, m *protocol.FileLocalCopy) {
+	from, err := expandPath(m.FromPath)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	to, err := expandPath(m.ToPath)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	if from == to {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "from equals to"})
+		return
+	}
+	if _, err := os.Stat(to); err == nil && !m.Overwrite {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "destination_exists"})
+		return
+	}
+	src, err := os.Open(from)
+	if err != nil {
+		if os.IsNotExist(err) {
+			send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "path_not_found"})
+			return
+		}
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	defer src.Close()
+	fi, err := src.Stat()
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	tmp := to + ".tether-tmp-" + m.MsgID
+	dst, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fi.Mode().Perm())
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	hash := sha256.New()
+	n, err := io.Copy(io.MultiWriter(dst, hash), src)
+	dst.Close()
+	if err != nil {
+		os.Remove(tmp)
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	if err := os.Rename(tmp, to); err != nil {
+		os.Remove(tmp)
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
+		"bytes": n, "sha256": hex.EncodeToString(hash.Sum(nil)),
+	}})
+}

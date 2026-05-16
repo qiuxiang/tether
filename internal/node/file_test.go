@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/qiuxiang/tether/internal/protocol"
 	"github.com/stretchr/testify/require"
@@ -107,4 +108,67 @@ func TestUploadAbortCleansTempFile(t *testing.T) {
 	h.Handle(s, &protocol.FileAbort{MsgID: "u5", Error: "cancelled"})
 	matches, _ := filepath.Glob(dst + ".tether-tmp-*")
 	require.Empty(t, matches, "temp file should be cleaned up")
+}
+
+func TestDownloadHappyPath(t *testing.T) {
+	h := NewFileHandler()
+	s := &capSender{}
+	src := filepath.Join(t.TempDir(), "in.bin")
+	payload := []byte("file contents here")
+	require.NoError(t, os.WriteFile(src, payload, 0o644))
+
+	h.Handle(s, &protocol.FileGetOpen{MsgID: "d1", Path: src})
+
+	// First message should be a metadata reply.
+	s.mu.Lock()
+	require.IsType(t, &protocol.Reply{}, s.msgs[0])
+	require.True(t, s.msgs[0].(*protocol.Reply).OK)
+	s.mu.Unlock()
+
+	// Wait for chunks to arrive — file is small so it should arrive in one chunk.
+	require.Eventually(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, m := range s.msgs {
+			if ch, ok := m.(*protocol.FileChunk); ok && ch.EOF {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond)
+
+	var got []byte
+	s.mu.Lock()
+	for _, m := range s.msgs {
+		if ch, ok := m.(*protocol.FileChunk); ok {
+			got = append(got, ch.Data...)
+		}
+	}
+	s.mu.Unlock()
+	require.Equal(t, payload, got)
+}
+
+func TestDownloadMissingFile(t *testing.T) {
+	h := NewFileHandler()
+	s := &capSender{}
+	h.Handle(s, &protocol.FileGetOpen{MsgID: "d2", Path: "/nonexistent/path/here"})
+	final := s.last().(*protocol.Reply)
+	require.False(t, final.OK)
+	require.Equal(t, "path_not_found", final.Error)
+}
+
+func TestLocalCopyHappyPath(t *testing.T) {
+	h := NewFileHandler()
+	s := &capSender{}
+	dir := t.TempDir()
+	from := filepath.Join(dir, "a.bin")
+	to := filepath.Join(dir, "b.bin")
+	payload := []byte("xyzzy")
+	require.NoError(t, os.WriteFile(from, payload, 0o644))
+
+	h.Handle(s, &protocol.FileLocalCopy{MsgID: "c1", FromPath: from, ToPath: to})
+	final := s.last().(*protocol.Reply)
+	require.True(t, final.OK, final.Error)
+	got, _ := os.ReadFile(to)
+	require.Equal(t, payload, got)
 }
