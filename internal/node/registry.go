@@ -33,19 +33,35 @@ func (r *ProcessRegistry) Get(id string) (*Process, bool) {
 func (r *ProcessRegistry) List(filter string, limit int) []*Process {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]*Process, 0, len(r.procs))
-	for _, p := range r.procs {
-		if filter == "running" && p.Status != "running" {
-			continue
-		}
-		if filter == "exited" && p.Status != "exited" {
-			continue
-		}
-		out = append(out, p)
+
+	type entry struct {
+		p          *Process
+		status     string
+		lastActive time.Time
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].LastActiveAt.After(out[j].LastActiveAt) })
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	entries := make([]entry, 0, len(r.procs))
+	for _, p := range r.procs {
+		// Snapshot volatile fields under p.mu to avoid a data race with the
+		// goroutine that writes Status/ExitCode/LastActiveAt on process exit.
+		p.mu.Lock()
+		e := entry{p: p, status: p.Status, lastActive: p.LastActiveAt}
+		p.mu.Unlock()
+
+		if filter == "running" && e.status != "running" {
+			continue
+		}
+		if filter == "exited" && e.status != "exited" {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].lastActive.After(entries[j].lastActive) })
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	out := make([]*Process, len(entries))
+	for i, e := range entries {
+		out[i] = e.p
 	}
 	return out
 }
@@ -60,22 +76,28 @@ func (r *ProcessRegistry) Touch(id string) {
 
 // evictLocked drops the oldest exited entries until size <= cap.
 // Running entries are never evicted, even if they're the oldest.
-// NOTE: This reads p.Status and p.LastActiveAt without holding p.mu.
-// In practice, eviction only happens during Add, called single-threaded
-// from handler code, so the race is theoretical but documented here.
 func (r *ProcessRegistry) evictLocked() {
 	if len(r.procs) <= r.cap {
 		return
 	}
-	exited := make([]*Process, 0)
+	type exitedEntry struct {
+		p          *Process
+		lastActive time.Time
+	}
+	exited := make([]exitedEntry, 0)
 	for _, p := range r.procs {
-		if p.Status == "exited" {
-			exited = append(exited, p)
+		// Snapshot under p.mu to avoid a data race with the exit goroutine.
+		p.mu.Lock()
+		status := p.Status
+		lastActive := p.LastActiveAt
+		p.mu.Unlock()
+		if status == "exited" {
+			exited = append(exited, exitedEntry{p: p, lastActive: lastActive})
 		}
 	}
-	sort.Slice(exited, func(i, j int) bool { return exited[i].LastActiveAt.Before(exited[j].LastActiveAt) })
+	sort.Slice(exited, func(i, j int) bool { return exited[i].lastActive.Before(exited[j].lastActive) })
 	for len(r.procs) > r.cap && len(exited) > 0 {
-		victim := exited[0]
+		victim := exited[0].p
 		exited = exited[1:]
 		delete(r.procs, victim.ID)
 		// Best-effort log cleanup; ignore errors.

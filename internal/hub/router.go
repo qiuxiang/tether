@@ -1,6 +1,9 @@
 package hub
 
-import "sync"
+import (
+	"log"
+	"sync"
+)
 
 // Router maps msg_id → destination peer conn. Used to route replies and
 // streamed messages back from a node to the originating client.
@@ -48,7 +51,14 @@ func (r *Router) Forward(msgID string, raw []byte) bool {
 	if !ok {
 		return false
 	}
-	_ = rt.Conn.SendRaw(raw)
+	if err := rt.Conn.SendRaw(raw); err != nil {
+		log.Printf("router: send to %s failed: %v", msgID, err)
+		if rt.Sticky {
+			r.mu.Lock()
+			delete(r.routes, msgID)
+			r.mu.Unlock()
+		}
+	}
 	return true
 }
 

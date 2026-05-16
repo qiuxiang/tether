@@ -58,10 +58,16 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 }
 
 type clientSession struct {
-	id      string
-	conn    *websocket.Conn
-	server  *Server
-	mu      sync.Mutex
+	id     string
+	conn   *websocket.Conn
+	server *Server
+	mu     sync.Mutex
+	// pending tracks sticky-route msg_ids registered by this client so they can
+	// be cleaned from the global router when the client disconnects.
+	// TODO: entries here are not removed on normal stream completion, so long-
+	// lived clients accumulate stale entries. Acceptable for now (each entry is
+	// ~16 bytes; thousands of execs ≈ tens of KB) but should be plumbed through
+	// device_ws.run() in a follow-up.
 	pending map[string]struct{}
 }
 
