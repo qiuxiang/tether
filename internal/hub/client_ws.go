@@ -126,6 +126,10 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 	case *protocol.FileAbort:
 		cs.server.router.ForwardToNode(m.MsgID, raw)
 		cs.server.router.Unregister(m.MsgID)
+	case *protocol.FileRelay:
+		if err := cs.server.relay.Start(cs, m); err != nil {
+			cs.sendErrorReply(m.MsgID, err)
+		}
 	default:
 		// Unknown / not-routable from client: drop.
 	}

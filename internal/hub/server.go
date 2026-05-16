@@ -11,15 +11,18 @@ type Server struct {
 	registry *Registry
 	clients  *ClientRegistry
 	router   *Router
+	relay    *RelayCoordinator
 }
 
 func NewServer(opts Options) *Server {
-	return &Server{
+	s := &Server{
 		opts:     opts,
 		registry: NewRegistry(),
 		clients:  NewClientRegistry(),
 		router:   NewRouter(),
 	}
+	s.relay = NewRelayCoordinator(s)
+	return s
 }
 
 func (s *Server) Registry() *Registry      { return s.registry }
