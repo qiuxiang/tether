@@ -90,3 +90,35 @@ func TestExecEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+func TestStartAndListProcesses(t *testing.T) {
+	c, _, cleanup := setupClusterWithClient(t)
+	defer cleanup()
+
+	pid := NewMsgID()
+	id := NewMsgID()
+	ch := c.rpc.Register(id)
+	require.NoError(t, c.Send(&protocol.Start{
+		MsgID: id, Target: "n1", ProcessID: pid,
+		Cmd: []string{"sh", "-c", "sleep 0.2"},
+	}))
+	select {
+	case r := <-ch:
+		require.True(t, r.OK)
+	case <-time.After(2 * time.Second):
+		t.Fatal("start timed out")
+	}
+	c.rpc.Unregister(id)
+
+	id = NewMsgID()
+	ch = c.rpc.Register(id)
+	require.NoError(t, c.Send(&protocol.List{MsgID: id, Target: "n1"}))
+	select {
+	case r := <-ch:
+		require.True(t, r.OK)
+		b, _ := json.Marshal(r.Data)
+		require.Contains(t, string(b), pid)
+	case <-time.After(2 * time.Second):
+		t.Fatal("list timed out")
+	}
+}
