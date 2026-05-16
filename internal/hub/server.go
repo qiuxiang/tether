@@ -29,5 +29,20 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/device", s.handleDevice)
+	mcpH := s.authMCP(s.mcpHandler())
+	mux.Handle("/mcp", mcpH)
+	mux.Handle("/mcp/", mcpH)
 	return mux
+}
+
+func (s *Server) authMCP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := r.Header.Get("Authorization")
+		want := "Bearer " + s.opts.Token
+		if h != want {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
