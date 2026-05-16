@@ -56,8 +56,6 @@ func setType(m Message) {
 		v.Type = m.msgType()
 	case *ListDevices:
 		v.Type = m.msgType()
-	case *Ping:
-		v.Type = m.msgType()
 	case *Hello:
 		v.Type = m.msgType()
 	case *Reply:
@@ -67,8 +65,6 @@ func setType(m Message) {
 	case *ExecExit:
 		v.Type = m.msgType()
 	case *Event:
-		v.Type = m.msgType()
-	case *Pong:
 		v.Type = m.msgType()
 	case *FileGetOpen:
 		v.Type = m.msgType()
@@ -111,8 +107,6 @@ func Decode(data []byte) (Message, error) {
 		m = &List{}
 	case "list_devices":
 		m = &ListDevices{}
-	case "ping":
-		m = &Ping{}
 	case "hello":
 		m = &Hello{}
 	case "reply":
@@ -123,8 +117,6 @@ func Decode(data []byte) (Message, error) {
 		m = &ExecExit{}
 	case "event":
 		m = &Event{}
-	case "pong":
-		m = &Pong{}
 	case "file_get_open":
 		m = &FileGetOpen{}
 	case "file_put_open":

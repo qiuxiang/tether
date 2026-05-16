@@ -63,10 +63,6 @@ type List struct {
 	Limit        int    `cbor:"limit,omitempty"`
 }
 
-type Ping struct {
-	Type string `cbor:"type"`
-}
-
 // Node → Hub
 type Hello struct {
 	Type         string `cbor:"type"`
@@ -105,10 +101,6 @@ type Event struct {
 	Kind      string `cbor:"kind"` // "exit"
 	ProcessID string `cbor:"process_id"`
 	Code      int    `cbor:"code,omitempty"`
-}
-
-type Pong struct {
-	Type string `cbor:"type"`
 }
 
 // ListDevices is a hub-local request (no Target).
@@ -191,13 +183,11 @@ func (m *Kill) msgType() string        { return "kill" }
 func (m *GetOutput) msgType() string   { return "get_output" }
 func (m *List) msgType() string        { return "list" }
 func (m *ListDevices) msgType() string { return "list_devices" }
-func (m *Ping) msgType() string        { return "ping" }
 func (m *Hello) msgType() string       { return "hello" }
 func (m *Reply) msgType() string       { return "reply" }
 func (m *ExecOutput) msgType() string  { return "exec_output" }
 func (m *ExecExit) msgType() string    { return "exec_exit" }
 func (m *Event) msgType() string       { return "event" }
-func (m *Pong) msgType() string        { return "pong" }
 func (m *FileGetOpen) msgType() string   { return "file_get_open" }
 func (m *FilePutOpen) msgType() string   { return "file_put_open" }
 func (m *FileChunk) msgType() string     { return "file_chunk" }
