@@ -136,7 +136,7 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 			continue
 		}
 		if c.handler != nil {
-			go c.handler.Handle(ctx, c, msg)
+			c.handler.Handle(ctx, c, msg)
 		}
 	}
 }
