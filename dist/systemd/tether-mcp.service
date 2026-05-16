@@ -1,0 +1,15 @@
+# Example user-mode unit. Install to ~/.config/systemd/user/ and run with
+#   systemctl --user enable --now tether-mcp.service
+# Note: Claude Code typically spawns `tether mcp` directly, so this unit is
+# only useful if you want to keep a long-lived MCP process for other clients.
+[Unit]
+Description=Tether MCP client (stdio)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/tether mcp
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=default.target
