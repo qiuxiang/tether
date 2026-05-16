@@ -15,6 +15,7 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	c.SetReadLimit(protocol.WSReadLimit)
 	ctx := r.Context()
 
 	sess, err := s.handshake(ctx, c)

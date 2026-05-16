@@ -26,6 +26,7 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	c.SetReadLimit(protocol.WSReadLimit)
 	ctx := r.Context()
 
 	hello, err := s.readHello(ctx, c)

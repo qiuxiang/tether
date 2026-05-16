@@ -7,6 +7,11 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+// WSReadLimit is the per-message read limit applied to every websocket.Conn.
+// File-transfer chunks are 256 KiB; 4 MiB gives comfortable headroom for CBOR
+// framing overhead while staying well below any network-layer limit.
+const WSReadLimit int64 = 4 << 20 // 4 MiB
+
 // decMode forces untyped nested maps to decode as map[string]any so the result
 // round-trips through encoding/json. Without this, fxamacker defaults to
 // map[interface{}]interface{}, which json.Marshal silently fails on.

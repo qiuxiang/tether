@@ -91,6 +91,7 @@ func (c *Conn) dial(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	ws.SetReadLimit(protocol.WSReadLimit)
 	defer ws.Close(websocket.StatusNormalClosure, "")
 
 	host, _ := os.Hostname()

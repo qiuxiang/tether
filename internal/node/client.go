@@ -107,6 +107,7 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	conn.SetReadLimit(protocol.WSReadLimit)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	hello := &protocol.Hello{
