@@ -65,6 +65,18 @@ func setType(m Message) {
 		v.Type = m.msgType()
 	case *Pong:
 		v.Type = m.msgType()
+	case *FileGetOpen:
+		v.Type = m.msgType()
+	case *FilePutOpen:
+		v.Type = m.msgType()
+	case *FileChunk:
+		v.Type = m.msgType()
+	case *FileAbort:
+		v.Type = m.msgType()
+	case *FileRelay:
+		v.Type = m.msgType()
+	case *FileLocalCopy:
+		v.Type = m.msgType()
 	case *rawMsg:
 		v.Type = m.msgType()
 	}
@@ -108,6 +120,18 @@ func Decode(data []byte) (Message, error) {
 		m = &Event{}
 	case "pong":
 		m = &Pong{}
+	case "file_get_open":
+		m = &FileGetOpen{}
+	case "file_put_open":
+		m = &FilePutOpen{}
+	case "file_chunk":
+		m = &FileChunk{}
+	case "file_abort":
+		m = &FileAbort{}
+	case "file_relay":
+		m = &FileRelay{}
+	case "file_local_copy":
+		m = &FileLocalCopy{}
 	default:
 		return nil, fmt.Errorf("unknown message type: %q", hdr.Type)
 	}

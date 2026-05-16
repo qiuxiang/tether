@@ -84,3 +84,41 @@ func TestRoundTripHelloRole(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "client", got.Role)
 }
+
+func TestRoundTripFilePutOpen(t *testing.T) {
+	in := &FilePutOpen{MsgID: "m1", Target: "n1", Path: "/tmp/x", Size: 1024, SHA256: "abc", Overwrite: true}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*FilePutOpen)
+	require.True(t, ok)
+	require.Equal(t, "n1", got.Target)
+	require.Equal(t, int64(1024), got.Size)
+	require.True(t, got.Overwrite)
+}
+
+func TestRoundTripFileChunk(t *testing.T) {
+	in := &FileChunk{MsgID: "m1", Seq: 3, Data: []byte("hello"), EOF: true}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*FileChunk)
+	require.True(t, ok)
+	require.Equal(t, int64(3), got.Seq)
+	require.Equal(t, []byte("hello"), got.Data)
+	require.True(t, got.EOF)
+}
+
+func TestRoundTripFileRelay(t *testing.T) {
+	in := &FileRelay{MsgID: "m1", FromNode: "a", FromPath: "/a", ToNode: "b", ToPath: "/b"}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*FileRelay)
+	require.True(t, ok)
+	require.Equal(t, "a", got.FromNode)
+	require.Equal(t, "/b", got.ToPath)
+}

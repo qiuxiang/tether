@@ -117,6 +117,67 @@ type ListDevices struct {
 	MsgID string `cbor:"msg_id"`
 }
 
+// FileGetOpen — client → hub → node (download). Node replies with metadata
+// then pushes FileChunk frames until EOF.
+type FileGetOpen struct {
+	Type   string `cbor:"type"`
+	MsgID  string `cbor:"msg_id"`
+	Target string `cbor:"target,omitempty"`
+	Path   string `cbor:"path"`
+}
+
+// FilePutOpen — client → hub → node (upload). Node replies ok:true when
+// ready; client pushes FileChunk frames until EOF=true; node verifies
+// sha256 then sends the final Reply.
+type FilePutOpen struct {
+	Type      string `cbor:"type"`
+	MsgID     string `cbor:"msg_id"`
+	Target    string `cbor:"target,omitempty"`
+	Path      string `cbor:"path"`
+	Size      int64  `cbor:"size"`
+	Mode      uint32 `cbor:"mode,omitempty"`
+	Overwrite bool   `cbor:"overwrite,omitempty"`
+	SHA256    string `cbor:"sha256,omitempty"`
+}
+
+// FileChunk — bidirectional streaming frame keyed by msg_id.
+type FileChunk struct {
+	Type  string `cbor:"type"`
+	MsgID string `cbor:"msg_id"`
+	Seq   int64  `cbor:"seq"`
+	Data  []byte `cbor:"data"`
+	EOF   bool   `cbor:"eof,omitempty"`
+}
+
+// FileAbort — either side cancels a transfer.
+type FileAbort struct {
+	Type  string `cbor:"type"`
+	MsgID string `cbor:"msg_id"`
+	Error string `cbor:"error"`
+}
+
+// FileRelay — client → hub only. Hub coordinates a streaming copy between
+// from_node and to_node.
+type FileRelay struct {
+	Type      string `cbor:"type"`
+	MsgID     string `cbor:"msg_id"`
+	FromNode  string `cbor:"from_node"`
+	FromPath  string `cbor:"from_path"`
+	ToNode    string `cbor:"to_node"`
+	ToPath    string `cbor:"to_path"`
+	Overwrite bool   `cbor:"overwrite,omitempty"`
+}
+
+// FileLocalCopy — client → hub → node. Same-node copy between two paths.
+type FileLocalCopy struct {
+	Type      string `cbor:"type"`
+	MsgID     string `cbor:"msg_id"`
+	Target    string `cbor:"target,omitempty"`
+	FromPath  string `cbor:"from_path"`
+	ToPath    string `cbor:"to_path"`
+	Overwrite bool   `cbor:"overwrite,omitempty"`
+}
+
 // Marker interface for any message.
 type Message interface {
 	msgType() string
@@ -137,3 +198,9 @@ func (m *ExecOutput) msgType() string  { return "exec_output" }
 func (m *ExecExit) msgType() string    { return "exec_exit" }
 func (m *Event) msgType() string       { return "event" }
 func (m *Pong) msgType() string        { return "pong" }
+func (m *FileGetOpen) msgType() string   { return "file_get_open" }
+func (m *FilePutOpen) msgType() string   { return "file_put_open" }
+func (m *FileChunk) msgType() string     { return "file_chunk" }
+func (m *FileAbort) msgType() string     { return "file_abort" }
+func (m *FileRelay) msgType() string     { return "file_relay" }
+func (m *FileLocalCopy) msgType() string { return "file_local_copy" }
