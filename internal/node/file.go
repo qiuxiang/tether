@@ -14,6 +14,7 @@ import (
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
+
 // FileHandler manages in-flight uploads and downloads on a node.
 type FileHandler struct {
 	mu        sync.Mutex
@@ -24,6 +25,7 @@ type FileHandler struct {
 }
 
 type uploadState struct {
+	mu        sync.Mutex // guards f, h, written during concurrent chunk delivery
 	path      string
 	tmpPath   string
 	f         *os.File
@@ -117,19 +119,24 @@ func (h *FileHandler) handleChunk(send Sender, m *protocol.FileChunk) {
 		// No matching upload — drop. (Downloads receive chunks at the other side.)
 		return
 	}
+	st.mu.Lock()
 	if len(m.Data) > 0 {
 		if _, err := st.f.Write(m.Data); err != nil {
+			st.mu.Unlock()
 			h.failUpload(send, m.MsgID, st, "disk_full")
 			return
 		}
 		st.h.Write(m.Data)
 		st.written += int64(len(m.Data))
 		if h.MaxFileSize > 0 && st.written > h.MaxFileSize {
+			st.mu.Unlock()
 			h.failUpload(send, m.MsgID, st, "size_limit_exceeded")
 			return
 		}
 	}
-	if m.EOF {
+	eof := m.EOF
+	st.mu.Unlock()
+	if eof {
 		h.finishUpload(send, m.MsgID, st)
 	}
 }
@@ -144,12 +151,20 @@ func (h *FileHandler) failUpload(send Sender, msgID string, st *uploadState, err
 }
 
 func (h *FileHandler) finishUpload(send Sender, msgID string, st *uploadState) {
-	if err := st.f.Sync(); err != nil {
-		h.failUpload(send, msgID, st, err.Error())
+	st.mu.Lock()
+	syncErr := st.f.Sync()
+	var written int64
+	var gotSHA string
+	if syncErr == nil {
+		st.f.Close()
+		gotSHA = hex.EncodeToString(st.h.Sum(nil))
+		written = st.written
+	}
+	st.mu.Unlock()
+	if syncErr != nil {
+		h.failUpload(send, msgID, st, syncErr.Error())
 		return
 	}
-	st.f.Close()
-	gotSHA := hex.EncodeToString(st.h.Sum(nil))
 	if st.wantSHA != "" && !strings.EqualFold(gotSHA, st.wantSHA) {
 		os.Remove(st.tmpPath)
 		h.mu.Lock()
@@ -170,7 +185,7 @@ func (h *FileHandler) finishUpload(send Sender, msgID string, st *uploadState) {
 	delete(h.uploads, msgID)
 	h.mu.Unlock()
 	send.Send(&protocol.Reply{MsgID: msgID, OK: true, Data: map[string]any{
-		"bytes": st.written, "sha256": gotSHA,
+		"bytes": written, "sha256": gotSHA,
 	}})
 }
 

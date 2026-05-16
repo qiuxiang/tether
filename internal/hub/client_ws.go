@@ -232,7 +232,10 @@ func (cs *clientSession) routeFilePut(msgID, target string, raw []byte) {
 		cs.sendErrorReply(msgID, fmt.Errorf("device_offline: %s", target))
 		return
 	}
-	cs.server.router.Register(msgID, cs, false) // final Reply is one-shot
+	// sticky=true: both the ok-to-send Reply and the final Reply must flow back
+	// to the client; the route must also survive so that FileChunk frames sent by
+	// the client (ForwardToNode) can be forwarded to the node.
+	cs.server.router.Register(msgID, cs, true)
 	cs.server.router.RegisterNode(msgID, d.Conn) // chunks flow client → node
 	cs.trackPending(msgID)
 	if err := d.Conn.SendRaw(raw); err != nil {
