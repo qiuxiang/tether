@@ -13,6 +13,16 @@ import (
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
+// closeSlave closes only the slave end of the PTY when possible. On Unix
+// this lets the master's pending buffer drain through Read→EOF instead of
+// being discarded by an early master Close. On Windows (ConPty) the slave
+// concept differs and there's nothing to close separately, so we no-op.
+func closeSlave(p pty.Pty) {
+	if u, ok := p.(pty.UnixPty); ok {
+		_ = u.Slave().Close()
+	}
+}
+
 // runExecStreamPTY runs an exec command attached to a PTY.
 func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, error) {
 	p, err := pty.New()
@@ -54,10 +64,15 @@ func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, 
 		}
 	}()
 
-	// Wait for the process to finish, then close the PTY to unblock the reader.
+	// Wait for the process to finish. Then close the slave end so the master's
+	// Read returns EOF naturally — only after the reader has drained whatever
+	// bytes the child wrote just before exiting. Closing the master directly
+	// here would discard buffered slave→master data that the reader hasn't
+	// picked up yet, which surfaced as a flaky "TTY" detection test under load.
 	werr := c.Wait()
-	p.Close()
+	closeSlave(p)
 	wg.Wait()
+	p.Close()
 
 	code := 0
 	if exitErr, ok := werr.(*exec.ExitError); ok {
@@ -138,10 +153,12 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 		close(stdinCh)
 		proc.stdin = nil
 		proc.mu.Unlock()
-		// Close PTY to unblock io.Copy, then wait for it to finish before
-		// closing the log file.
-		p.Close()
+		// Close the slave end first so the master's io.Copy reads remaining
+		// buffered output and then sees EOF cleanly; closing the master while
+		// data is still in the slave→master buffer discards those bytes.
+		closeSlave(p)
 		copyDone.Wait()
+		p.Close()
 		logFile.Close()
 		cancel()
 		onExit(code)
