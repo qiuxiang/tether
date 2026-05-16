@@ -120,6 +120,9 @@ func (s *deviceSession) run(ctx context.Context) {
 		id := msgID(msg)
 		if id != "" {
 			s.router.Forward(id, raw)
+			if _, ok := msg.(*protocol.ExecExit); ok {
+				s.router.Unregister(id)
+			}
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -39,22 +40,29 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := newClientID()
-	sess := &clientSession{id: id, conn: c, server: s}
+	sess := &clientSession{id: id, conn: c, server: s, pending: make(map[string]struct{})}
 	s.clients.Register(&Client{ID: id, ConnectedAt: time.Now(), Conn: sess})
 	log.Printf("client registered: id=%s", id)
 
 	defer func() {
 		log.Printf("client disconnected: id=%s", id)
 		s.clients.Unregister(id)
+		sess.mu.Lock()
+		for msgID := range sess.pending {
+			s.router.Unregister(msgID)
+		}
+		sess.mu.Unlock()
 		c.Close(websocket.StatusNormalClosure, "")
 	}()
 	sess.run(ctx)
 }
 
 type clientSession struct {
-	id     string
-	conn   *websocket.Conn
-	server *Server
+	id      string
+	conn    *websocket.Conn
+	server  *Server
+	mu      sync.Mutex
+	pending map[string]struct{}
 }
 
 func (cs *clientSession) SendRaw(raw []byte) error {
@@ -158,8 +166,18 @@ func (cs *clientSession) routeTo(msgID, target string, raw []byte, sticky bool) 
 		return fmt.Errorf("device_offline: %s", target)
 	}
 	cs.server.router.Register(msgID, cs, sticky)
+	if sticky {
+		cs.mu.Lock()
+		cs.pending[msgID] = struct{}{}
+		cs.mu.Unlock()
+	}
 	if err := d.Conn.SendRaw(raw); err != nil {
 		cs.server.router.Unregister(msgID)
+		if sticky {
+			cs.mu.Lock()
+			delete(cs.pending, msgID)
+			cs.mu.Unlock()
+		}
 		return err
 	}
 	return nil
