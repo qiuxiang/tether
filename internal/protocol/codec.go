@@ -2,9 +2,23 @@ package protocol
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/fxamacker/cbor/v2"
 )
+
+// decMode forces untyped nested maps to decode as map[string]any so the result
+// round-trips through encoding/json. Without this, fxamacker defaults to
+// map[interface{}]interface{}, which json.Marshal silently fails on.
+var decMode cbor.DecMode
+
+func init() {
+	m, err := cbor.DecOptions{DefaultMapType: reflect.TypeOf(map[string]any{})}.DecMode()
+	if err != nil {
+		panic(err)
+	}
+	decMode = m
+}
 
 type rawMsg struct {
 	Type string `cbor:"type"`
@@ -57,7 +71,7 @@ func setType(m Message) {
 // Decode peeks at "type" and unmarshals into the right concrete struct.
 func Decode(data []byte) (Message, error) {
 	var hdr rawMsg
-	if err := cbor.Unmarshal(data, &hdr); err != nil {
+	if err := decMode.Unmarshal(data, &hdr); err != nil {
 		return nil, fmt.Errorf("decode header: %w", err)
 	}
 	var m Message
@@ -93,7 +107,7 @@ func Decode(data []byte) (Message, error) {
 	default:
 		return nil, fmt.Errorf("unknown message type: %q", hdr.Type)
 	}
-	if err := cbor.Unmarshal(data, m); err != nil {
+	if err := decMode.Unmarshal(data, m); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", hdr.Type, err)
 	}
 	return m, nil

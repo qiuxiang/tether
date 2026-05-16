@@ -23,8 +23,12 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		c.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
-	defer s.registry.Unregister(sess.device.Hostname)
-	defer c.Close(websocket.StatusNormalClosure, "")
+	log.Printf("device registered: hostname=%s os=%s arch=%s", sess.device.Hostname, sess.device.OS, sess.device.Arch)
+	defer func() {
+		log.Printf("device disconnected: hostname=%s", sess.device.Hostname)
+		s.registry.Unregister(sess.device.Hostname)
+		c.Close(websocket.StatusNormalClosure, "")
+	}()
 
 	sess.run(ctx)
 }
