@@ -141,19 +141,21 @@ func (h *ProcessHandler) handleList(send Sender, m *protocol.List) {
 	if limit == 0 {
 		limit = 50
 	}
-	list := h.registry.List(m.StatusFilter, limit)
+	// Use ListSnapshots so that Status, LastActiveAt, and ExitCode are all
+	// captured under p.mu inside the registry call.  No locking is needed here.
+	list := h.registry.ListSnapshots(m.StatusFilter, limit)
 	items := make([]map[string]any, 0, len(list))
-	for _, p := range list {
+	for _, snap := range list {
 		entry := map[string]any{
-			"process_id":     p.ID,
-			"name":           p.Name,
-			"cmd":            p.Cmd,
-			"status":         p.Status,
-			"started_at":     p.StartedAt.Unix(),
-			"last_active_at": p.LastActiveAt.Unix(),
+			"process_id":     snap.ID,
+			"name":           snap.Name,
+			"cmd":            snap.Cmd,
+			"status":         snap.Status,
+			"started_at":     snap.StartedAt.Unix(),
+			"last_active_at": snap.LastActiveAt.Unix(),
 		}
-		if p.ExitCode != nil {
-			entry["exit_code"] = *p.ExitCode
+		if snap.ExitCode != nil {
+			entry["exit_code"] = *snap.ExitCode
 		}
 		items = append(items, entry)
 	}
