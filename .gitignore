@@ -1,0 +1,4 @@
+/tether
+/dist/
+*.log
+.DS_Store
