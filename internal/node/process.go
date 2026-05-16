@@ -28,6 +28,7 @@ type Process struct {
 	LastActiveAt time.Time
 	ExitCode     *int
 	LogPath      string
+	Pid          int
 
 	// Runtime handles; nil after exit.
 	mu     sync.Mutex
@@ -60,6 +61,7 @@ func (p *Process) startPipe(ctx context.Context, logDir string, env map[string]s
 	cmd.Env = mergeEnv(env)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	cmd.SysProcAttr = childAttr()
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -79,6 +81,7 @@ func (p *Process) startPipe(ctx context.Context, logDir string, env map[string]s
 	p.StartedAt = time.Now()
 	p.LastActiveAt = p.StartedAt
 	p.cancel = cancel
+	p.Pid = cmd.Process.Pid
 	stdinCh := make(chan []byte, 16)
 	p.stdin = stdinCh
 	p.mu.Unlock()
@@ -162,6 +165,7 @@ func runExecStream(ctx context.Context, m *protocol.Exec, send Sender) (int, err
 	cmd := exec.CommandContext(ctx, m.Cmd[0], m.Cmd[1:]...)
 	cmd.Dir = m.Cwd
 	cmd.Env = mergeEnv(m.Env)
+	cmd.SysProcAttr = childAttr()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

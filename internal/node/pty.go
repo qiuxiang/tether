@@ -23,6 +23,7 @@ func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, 
 	c := p.CommandContext(ctx, m.Cmd[0], m.Cmd[1:]...)
 	c.Dir = m.Cwd
 	c.Env = mergeEnv(m.Env)
+	c.SysProcAttr = childAttrPTY()
 
 	if err := c.Start(); err != nil {
 		p.Close()
@@ -88,6 +89,7 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 	c := p.CommandContext(ctx, proc.Cmd[0], proc.Cmd[1:]...)
 	c.Dir = cwd
 	c.Env = mergeEnv(env)
+	c.SysProcAttr = childAttrPTY()
 
 	if err := c.Start(); err != nil {
 		p.Close()
@@ -101,6 +103,7 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 	proc.StartedAt = time.Now()
 	proc.LastActiveAt = proc.StartedAt
 	proc.cancel = cancel
+	proc.Pid = c.Process.Pid
 	stdinCh := make(chan []byte, 16)
 	proc.stdin = stdinCh
 	proc.mu.Unlock()

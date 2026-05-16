@@ -8,7 +8,7 @@ import (
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
-type processHandler struct {
+type ProcessHandler struct {
 	registry   *ProcessRegistry
 	logDir     string
 	mu         sync.Mutex
@@ -16,15 +16,15 @@ type processHandler struct {
 	execCancel map[string]context.CancelFunc
 }
 
-func NewProcessHandler(logDir string, cap int) *processHandler {
-	return &processHandler{
+func NewProcessHandler(logDir string, cap int) *ProcessHandler {
+	return &ProcessHandler{
 		registry:   NewProcessRegistry(cap),
 		logDir:     logDir,
 		execCancel: make(map[string]context.CancelFunc),
 	}
 }
 
-func (h *processHandler) Handle(ctx context.Context, send Sender, msg protocol.Message) {
+func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.Message) {
 	switch m := msg.(type) {
 	case *protocol.Start:
 		h.handleStart(send, m)
@@ -43,7 +43,7 @@ func (h *processHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 	}
 }
 
-func (h *processHandler) handleStart(send Sender, m *protocol.Start) {
+func (h *ProcessHandler) handleStart(send Sender, m *protocol.Start) {
 	p := &Process{ID: m.ProcessID, Name: m.Name, Cmd: m.Cmd}
 	err := p.Start(context.Background(), h.logDir, m.Env, m.Cwd, m.TTY, func(code int) {
 		send.Send(&protocol.Event{Kind: "exit", ProcessID: m.ProcessID, Code: code})
@@ -56,7 +56,7 @@ func (h *processHandler) handleStart(send Sender, m *protocol.Start) {
 	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{"process_id": m.ProcessID}})
 }
 
-func (h *processHandler) handleKill(send Sender, m *protocol.Kill) {
+func (h *ProcessHandler) handleKill(send Sender, m *protocol.Kill) {
 	p, ok := h.registry.Get(m.ProcessID)
 	if !ok {
 		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not found"})
@@ -69,13 +69,13 @@ func (h *processHandler) handleKill(send Sender, m *protocol.Kill) {
 	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true})
 }
 
-func (h *processHandler) handleStdin(m *protocol.Stdin) {
+func (h *ProcessHandler) handleStdin(m *protocol.Stdin) {
 	if p, ok := h.registry.Get(m.ProcessID); ok {
 		_ = p.WriteStdin(m.Data)
 	}
 }
 
-func (h *processHandler) handleGetOutput(send Sender, m *protocol.GetOutput) {
+func (h *ProcessHandler) handleGetOutput(send Sender, m *protocol.GetOutput) {
 	p, ok := h.registry.Get(m.ProcessID)
 	if !ok {
 		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not found"})
@@ -91,7 +91,7 @@ func (h *processHandler) handleGetOutput(send Sender, m *protocol.GetOutput) {
 	}})
 }
 
-func (h *processHandler) handleExec(send Sender, m *protocol.Exec) {
+func (h *ProcessHandler) handleExec(send Sender, m *protocol.Exec) {
 	ctx, cancel := context.WithCancel(context.Background())
 	if m.TimeoutMs > 0 {
 		var stop context.CancelFunc
@@ -116,7 +116,7 @@ func (h *processHandler) handleExec(send Sender, m *protocol.Exec) {
 	send.Send(&protocol.ExecExit{MsgID: m.MsgID, Code: code, Error: errStr})
 }
 
-func (h *processHandler) handleExecCancel(m *protocol.ExecCancel) {
+func (h *ProcessHandler) handleExecCancel(m *protocol.ExecCancel) {
 	h.execMu.Lock()
 	if c, ok := h.execCancel[m.MsgID]; ok {
 		c()
@@ -124,7 +124,19 @@ func (h *processHandler) handleExecCancel(m *protocol.ExecCancel) {
 	h.execMu.Unlock()
 }
 
-func (h *processHandler) handleList(send Sender, m *protocol.List) {
+// Shutdown sends SIGTERM to all running process groups. Idempotent.
+func (h *ProcessHandler) Shutdown() {
+	for _, p := range h.registry.List("running", 0) {
+		p.mu.Lock()
+		pid := p.Pid
+		p.mu.Unlock()
+		if pid > 0 {
+			killGroup(pid)
+		}
+	}
+}
+
+func (h *ProcessHandler) handleList(send Sender, m *protocol.List) {
 	limit := m.Limit
 	if limit == 0 {
 		limit = 50

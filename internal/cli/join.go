@@ -37,11 +37,13 @@ func Join(args []string, stderr io.Writer) int {
 		Token:    cfg.Token,
 		Hostname: host,
 	})
-	cli.SetHandler(node.NewProcessHandler(cfg.LogDir, 50))
+	ph := node.NewProcessHandler(cfg.LogDir, 50)
+	cli.SetHandler(ph)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cli.Run(ctx)
+	ph.Shutdown()
 	return 0
 }
 
