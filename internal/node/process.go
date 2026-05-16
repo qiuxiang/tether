@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/qiuxiang/tether/internal/protocol"
 )
 
 // removeFile is a var so tests can stub it. Default: os.Remove.
@@ -155,6 +158,76 @@ func (p *Process) Kill(signal string) error {
 	_ = syscall.SIGTERM // reserve for future graceful signal path
 	cancel()
 	return nil
+}
+
+func runExecStream(ctx context.Context, m *protocol.Exec, send Sender) (int, error) {
+	if m.TTY {
+		return runExecStreamPTY(ctx, m, send)
+	}
+	cmd := exec.CommandContext(ctx, m.Cmd[0], m.Cmd[1:]...)
+	cmd.Dir = m.Cwd
+	cmd.Env = mergeEnv(m.Env)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return -1, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return -1, err
+	}
+	var stdin io.WriteCloser
+	if len(m.Stdin) > 0 {
+		stdin, err = cmd.StdinPipe()
+		if err != nil {
+			return -1, err
+		}
+	}
+
+	if err := cmd.Start(); err != nil {
+		return -1, err
+	}
+	if stdin != nil {
+		stdin.Write(m.Stdin)
+		stdin.Close()
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go streamReader(stdout, "stdout", m.MsgID, send, &wg)
+	go streamReader(stderr, "stderr", m.MsgID, send, &wg)
+	wg.Wait()
+
+	werr := cmd.Wait()
+	code := 0
+	if exitErr, ok := werr.(*exec.ExitError); ok {
+		code = exitErr.ExitCode()
+	} else if werr != nil {
+		code = -1
+	}
+	return code, nil
+}
+
+func streamReader(r io.Reader, stream, msgID string, send Sender, wg *sync.WaitGroup) {
+	defer wg.Done()
+	br := bufio.NewReader(r)
+	buf := make([]byte, 4096)
+	for {
+		n, err := br.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			send.Send(&protocol.ExecOutput{MsgID: msgID, Stream: stream, Data: chunk})
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// Stub: real PTY implementation lands in Task 9.
+func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, error) {
+	return -1, fmt.Errorf("tty not yet supported")
 }
 
 // ReadOutput returns log bytes starting at offset, up to length. eof=true when

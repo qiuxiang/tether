@@ -3,18 +3,25 @@ package node
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
 type processHandler struct {
-	registry *ProcessRegistry
-	logDir   string
-	mu       sync.Mutex
+	registry   *ProcessRegistry
+	logDir     string
+	mu         sync.Mutex
+	execMu     sync.Mutex
+	execCancel map[string]context.CancelFunc
 }
 
 func NewProcessHandler(logDir string, cap int) *processHandler {
-	return &processHandler{registry: NewProcessRegistry(cap), logDir: logDir}
+	return &processHandler{
+		registry:   NewProcessRegistry(cap),
+		logDir:     logDir,
+		execCancel: make(map[string]context.CancelFunc),
+	}
 }
 
 func (h *processHandler) Handle(ctx context.Context, send Sender, msg protocol.Message) {
@@ -29,6 +36,10 @@ func (h *processHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 		h.handleGetOutput(send, m)
 	case *protocol.List:
 		h.handleList(send, m)
+	case *protocol.Exec:
+		go h.handleExec(send, m)
+	case *protocol.ExecCancel:
+		h.handleExecCancel(m)
 	}
 }
 
@@ -78,6 +89,39 @@ func (h *processHandler) handleGetOutput(send Sender, m *protocol.GetOutput) {
 	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
 		"data": data, "next_offset": next, "eof": eof,
 	}})
+}
+
+func (h *processHandler) handleExec(send Sender, m *protocol.Exec) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if m.TimeoutMs > 0 {
+		var stop context.CancelFunc
+		ctx, stop = context.WithTimeout(ctx, time.Duration(m.TimeoutMs)*time.Millisecond)
+		defer stop()
+	}
+	h.execMu.Lock()
+	h.execCancel[m.MsgID] = cancel
+	h.execMu.Unlock()
+	defer func() {
+		h.execMu.Lock()
+		delete(h.execCancel, m.MsgID)
+		h.execMu.Unlock()
+		cancel()
+	}()
+
+	code, err := runExecStream(ctx, m, send)
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+	}
+	send.Send(&protocol.ExecExit{MsgID: m.MsgID, Code: code, Error: errStr})
+}
+
+func (h *processHandler) handleExecCancel(m *protocol.ExecCancel) {
+	h.execMu.Lock()
+	if c, ok := h.execCancel[m.MsgID]; ok {
+		c()
+	}
+	h.execMu.Unlock()
 }
 
 func (h *processHandler) handleList(send Sender, m *protocol.List) {
