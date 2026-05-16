@@ -128,6 +128,9 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	c.conn = conn
 	c.mu.Unlock()
 
+	// Keep the connection alive across idle reverse-proxy timeouts.
+	go pingLoop(ctx, conn)
+
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -140,6 +143,29 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 		}
 		if c.handler != nil {
 			c.handler.Handle(ctx, c, msg)
+		}
+	}
+}
+
+// pingLoop sends RFC 6455 Ping frames on a 45s interval so reverse proxies
+// (which typically idle-out a WS conn after 2-3 min) don't drop the link.
+// On ping failure or timeout, it closes the conn — the outer reconnect loop
+// dials again on next tick.
+func pingLoop(ctx context.Context, conn *websocket.Conn) {
+	t := time.NewTicker(45 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err := conn.Ping(pctx)
+			cancel()
+			if err != nil {
+				conn.Close(websocket.StatusPolicyViolation, "ping timeout")
+				return
+			}
 		}
 	}
 }
