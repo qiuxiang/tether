@@ -72,3 +72,35 @@ func TestHelloHandshakeDuplicateHostname(t *testing.T) {
 	_, _, err := c2.Read(context.Background())
 	assert.Error(t, err)
 }
+
+func TestClientHandshake(t *testing.T) {
+	s := NewServer(Options{Token: "tk"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	wsURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	hello := &protocol.Hello{Hostname: "claude-host", Token: "tk", Role: "client"}
+	raw, _ := protocol.Encode(hello)
+	require.NoError(t, c.Write(ctx, websocket.MessageBinary, raw))
+
+	// Send ListDevices, expect a Reply back.
+	req := &protocol.ListDevices{MsgID: "1"}
+	rraw, _ := protocol.Encode(req)
+	require.NoError(t, c.Write(ctx, websocket.MessageBinary, rraw))
+
+	_, data, err := c.Read(ctx)
+	require.NoError(t, err)
+	msg, err := protocol.Decode(data)
+	require.NoError(t, err)
+	reply, ok := msg.(*protocol.Reply)
+	require.True(t, ok)
+	require.Equal(t, "1", reply.MsgID)
+	require.True(t, reply.OK)
+}

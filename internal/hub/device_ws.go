@@ -39,7 +39,8 @@ type deviceSession struct {
 	router *Router
 }
 
-func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSession, error) {
+// readHello reads the initial Hello frame and validates the shared token.
+func (s *Server) readHello(ctx context.Context, c *websocket.Conn) (*protocol.Hello, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, data, err := c.Read(ctx)
@@ -56,6 +57,17 @@ func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSessi
 	}
 	if hello.Token != s.opts.Token {
 		return nil, errAuth("bad token")
+	}
+	return hello, nil
+}
+
+func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSession, error) {
+	hello, err := s.readHello(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if hello.Role != "" && hello.Role != "node" {
+		return nil, errAuth("role must be node or empty")
 	}
 	d := &Device{
 		Hostname:     hello.Hostname,
