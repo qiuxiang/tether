@@ -114,6 +114,18 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 		cs.routeOneShot(m.MsgID, m.Target, raw)
 	case *protocol.List:
 		cs.routeOneShot(m.MsgID, m.Target, raw)
+	case *protocol.FilePutOpen:
+		cs.routeFilePut(m.MsgID, m.Target, raw)
+	case *protocol.FileGetOpen:
+		cs.routeFileGet(m.MsgID, m.Target, raw)
+	case *protocol.FileLocalCopy:
+		cs.routeOneShot(m.MsgID, m.Target, raw)
+	case *protocol.FileChunk:
+		// Client pushing a chunk to a node mid-upload — forward by msg_id.
+		cs.server.router.ForwardToNode(m.MsgID, raw)
+	case *protocol.FileAbort:
+		cs.server.router.ForwardToNode(m.MsgID, raw)
+		cs.server.router.Unregister(m.MsgID)
 	default:
 		// Unknown / not-routable from client: drop.
 	}
@@ -196,4 +208,49 @@ func (cs *clientSession) sendErrorReply(msgID string, err error) {
 		return
 	}
 	_ = cs.SendRaw(out)
+}
+
+func (cs *clientSession) trackPending(msgID string) {
+	cs.mu.Lock()
+	cs.pending[msgID] = struct{}{}
+	cs.mu.Unlock()
+}
+
+func (cs *clientSession) untrackPending(msgID string) {
+	cs.mu.Lock()
+	delete(cs.pending, msgID)
+	cs.mu.Unlock()
+}
+
+func (cs *clientSession) routeFilePut(msgID, target string, raw []byte) {
+	d, ok := cs.server.registry.Get(target)
+	if !ok || d.Conn == nil {
+		cs.sendErrorReply(msgID, fmt.Errorf("device_offline: %s", target))
+		return
+	}
+	cs.server.router.Register(msgID, cs, false) // final Reply is one-shot
+	cs.server.router.RegisterNode(msgID, d.Conn) // chunks flow client → node
+	cs.trackPending(msgID)
+	if err := d.Conn.SendRaw(raw); err != nil {
+		cs.server.router.Unregister(msgID)
+		cs.untrackPending(msgID)
+		cs.sendErrorReply(msgID, err)
+	}
+}
+
+func (cs *clientSession) routeFileGet(msgID, target string, raw []byte) {
+	d, ok := cs.server.registry.Get(target)
+	if !ok || d.Conn == nil {
+		cs.sendErrorReply(msgID, fmt.Errorf("device_offline: %s", target))
+		return
+	}
+	// metadata Reply + chunk stream all flow node→client; sticky until EOF.
+	cs.server.router.Register(msgID, cs, true)
+	cs.server.router.RegisterNode(msgID, d.Conn) // for client→node abort frames
+	cs.trackPending(msgID)
+	if err := d.Conn.SendRaw(raw); err != nil {
+		cs.server.router.Unregister(msgID)
+		cs.untrackPending(msgID)
+		cs.sendErrorReply(msgID, err)
+	}
 }

@@ -119,8 +119,15 @@ func (s *deviceSession) run(ctx context.Context) {
 		s.device.LastSeen = time.Now()
 		id := msgID(msg)
 		if id != "" {
-			s.router.Forward(id, raw)
-			if _, ok := msg.(*protocol.ExecExit); ok {
+			s.router.ForwardToClient(id, raw)
+			switch v := msg.(type) {
+			case *protocol.ExecExit:
+				s.router.Unregister(id)
+			case *protocol.FileChunk:
+				if v.EOF {
+					s.router.Unregister(id)
+				}
+			case *protocol.FileAbort:
 				s.router.Unregister(id)
 			}
 		}
@@ -135,6 +142,10 @@ func msgID(m protocol.Message) string {
 	case *protocol.ExecOutput:
 		return v.MsgID
 	case *protocol.ExecExit:
+		return v.MsgID
+	case *protocol.FileChunk:
+		return v.MsgID
+	case *protocol.FileAbort:
 		return v.MsgID
 	}
 	return ""

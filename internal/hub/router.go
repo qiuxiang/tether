@@ -5,18 +5,19 @@ import (
 	"sync"
 )
 
-// Router maps msg_id → destination peer conn. Used to route replies and
-// streamed messages back from a node to the originating client.
-//
-// One-shot routes are removed after the first delivery; sticky routes stay
-// until explicitly unregistered (used for streamed RPCs and file transfers).
+// Router stores msg_id ↔ (Client, Node) PeerConn pairs used to route
+// streaming messages in either direction. Use Register for the client
+// (one-shot reply or sticky stream) and RegisterNode for the node side
+// (when chunks/aborts flow client → node and need to be forwarded by
+// msg_id).
 type Router struct {
 	mu     sync.Mutex
 	routes map[string]route
 }
 
 type route struct {
-	Conn   PeerConn
+	Client PeerConn // the originating client
+	Node   PeerConn // the target node (for upload-direction forwarding)
 	Sticky bool
 }
 
@@ -24,12 +25,24 @@ func NewRouter() *Router {
 	return &Router{routes: make(map[string]route)}
 }
 
-// Register associates msg_id with the peer that should receive the reply.
-// sticky=true keeps the route alive after Forward; sticky=false removes it
-// on first Forward.
-func (r *Router) Register(msgID string, conn PeerConn, sticky bool) {
+// Register associates msg_id with the client peer that will receive replies.
+// One-shot unless sticky=true.
+func (r *Router) Register(msgID string, client PeerConn, sticky bool) {
 	r.mu.Lock()
-	r.routes[msgID] = route{Conn: conn, Sticky: sticky}
+	cur := r.routes[msgID]
+	cur.Client = client
+	cur.Sticky = sticky
+	r.routes[msgID] = cur
+	r.mu.Unlock()
+}
+
+// RegisterNode marks the node side of a sticky route so chunks/aborts
+// flowing from the client can be forwarded to the right node by msg_id.
+func (r *Router) RegisterNode(msgID string, node PeerConn) {
+	r.mu.Lock()
+	cur := r.routes[msgID]
+	cur.Node = node
+	r.routes[msgID] = cur
 	r.mu.Unlock()
 }
 
@@ -39,20 +52,21 @@ func (r *Router) Unregister(msgID string) {
 	r.mu.Unlock()
 }
 
-// Forward writes raw bytes to the peer registered under msg_id. Returns
-// true if a route existed. Removes the route if it was one-shot.
-func (r *Router) Forward(msgID string, raw []byte) bool {
+// ForwardToClient delivers raw bytes from a node back to the originating
+// client. Returns true if a route was found. One-shot routes are removed
+// after delivery; sticky routes are also removed if the send errored.
+func (r *Router) ForwardToClient(msgID string, raw []byte) bool {
 	r.mu.Lock()
 	rt, ok := r.routes[msgID]
 	if ok && !rt.Sticky {
 		delete(r.routes, msgID)
 	}
 	r.mu.Unlock()
-	if !ok {
+	if !ok || rt.Client == nil {
 		return false
 	}
-	if err := rt.Conn.SendRaw(raw); err != nil {
-		log.Printf("router: send to %s failed: %v", msgID, err)
+	if err := rt.Client.SendRaw(raw); err != nil {
+		log.Printf("router: send to client %s failed: %v", msgID, err)
 		if rt.Sticky {
 			r.mu.Lock()
 			delete(r.routes, msgID)
@@ -62,14 +76,26 @@ func (r *Router) Forward(msgID string, raw []byte) bool {
 	return true
 }
 
-// Lookup returns the conn for msg_id without removing it (used to inspect
-// sticky routes when deciding what to do).
-func (r *Router) Lookup(msgID string) (PeerConn, bool) {
+// ForwardToNode delivers raw bytes from a client to the node side of the
+// route. Non-removing — used for chunk streams; route cleanup happens on
+// EOF/abort elsewhere.
+func (r *Router) ForwardToNode(msgID string, raw []byte) bool {
 	r.mu.Lock()
 	rt, ok := r.routes[msgID]
 	r.mu.Unlock()
-	if !ok {
-		return nil, false
+	if !ok || rt.Node == nil {
+		return false
 	}
-	return rt.Conn, true
+	if err := rt.Node.SendRaw(raw); err != nil {
+		log.Printf("router: send to node %s failed: %v", msgID, err)
+	}
+	return true
+}
+
+// Lookup returns the full route for msg_id. Used by relay coordinator.
+func (r *Router) Lookup(msgID string) (route, bool) {
+	r.mu.Lock()
+	rt, ok := r.routes[msgID]
+	r.mu.Unlock()
+	return rt, ok
 }
