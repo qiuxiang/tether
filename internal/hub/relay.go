@@ -26,6 +26,7 @@ type relayState struct {
 	client      PeerConn
 	metaReady   chan *protocol.Reply
 	putReady    chan *protocol.Reply
+	sourceItcp  *relaySourceInterceptor
 }
 
 func NewRelayCoordinator(s *Server) *RelayCoordinator {
@@ -61,10 +62,16 @@ func (rc *RelayCoordinator) Start(client PeerConn, m *protocol.FileRelay) error 
 	rc.mu.Unlock()
 
 	// Hook routes:
-	//   - first Reply for getID lands in metaReady (then we'll re-register for chunks)
+	//   - source side: combined interceptor captures metadata Reply and buffers
+	//     FileChunk/FileAbort frames until the destination is ready.
 	//   - first Reply for putID lands in putReady (then re-registered for final)
-	rc.server.router.Register(getID, &replyInterceptor{ch: st.metaReady}, true)
+	sourceItcp := &relaySourceInterceptor{
+		metaReady: st.metaReady,
+		toConn:    st.toConn,
+	}
+	rc.server.router.Register(getID, sourceItcp, true)
 	rc.server.router.Register(putID, &replyInterceptor{ch: st.putReady}, false)
+	st.sourceItcp = sourceItcp
 
 	rawGet, _ := protocol.Encode(&protocol.FileGetOpen{MsgID: getID, Path: m.FromPath})
 	if err := from.Conn.SendRaw(rawGet); err != nil {
@@ -119,8 +126,11 @@ func (rc *RelayCoordinator) coordinate(m *protocol.FileRelay, st *relayState) {
 		return
 	}
 
-	// Stream: rewrite chunks from getMsgID into putMsgID and forward to toConn.
-	rc.server.router.Register(st.getMsgID, &chunkRewriter{toConn: st.toConn, toMsgID: st.putMsgID}, true)
+	// Unblock the source interceptor: it can now rewrite and forward buffered
+	// and future FileChunk/FileAbort frames directly to toConn.
+	st.sourceItcp.SetDestination(st.putMsgID)
+	// Register the final-reply route so the destination's completion Reply
+	// is forwarded back to the client under the client's outer msg_id.
 	rc.server.router.Register(st.putMsgID, &finalDeliverer{
 		client:      st.client,
 		clientMsgID: st.clientMsgID,
@@ -173,6 +183,82 @@ func (i *replyInterceptor) SendRaw(raw []byte) error {
 	return nil
 }
 func (i *replyInterceptor) Close() {}
+
+// relaySourceInterceptor handles the source side of a FileRelay. The first
+// Reply goes to metaReady; FileChunk/FileAbort frames are rewritten with
+// toMsgID and forwarded to toConn. Frames that arrive before SetDestination
+// has been called are buffered so they are not lost.
+type relaySourceInterceptor struct {
+	mu        sync.Mutex
+	metaReady chan *protocol.Reply
+	toConn    PeerConn
+	toMsgID   string   // empty until SetDestination called
+	buffered  [][]byte // raw FileChunk/FileAbort frames waiting for destination
+}
+
+func (r *relaySourceInterceptor) SetDestination(toMsgID string) {
+	r.mu.Lock()
+	r.toMsgID = toMsgID
+	pending := r.buffered
+	r.buffered = nil
+	r.mu.Unlock()
+	// Drain buffered frames outside the lock.
+	for _, raw := range pending {
+		_ = r.forwardFrame(raw)
+	}
+}
+
+func (r *relaySourceInterceptor) SendRaw(raw []byte) error {
+	msg, err := protocol.Decode(raw)
+	if err != nil {
+		return err
+	}
+	switch m := msg.(type) {
+	case *protocol.Reply:
+		select {
+		case r.metaReady <- m:
+		default:
+		}
+		return nil
+	case *protocol.FileChunk, *protocol.FileAbort:
+		r.mu.Lock()
+		ready := r.toMsgID != ""
+		if !ready {
+			r.buffered = append(r.buffered, append([]byte(nil), raw...))
+		}
+		r.mu.Unlock()
+		if ready {
+			return r.forwardFrame(raw)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (r *relaySourceInterceptor) Close() {}
+
+// forwardFrame decodes the raw frame, rewrites MsgID to toMsgID, re-encodes,
+// and sends to toConn. Only called after toMsgID is set.
+func (r *relaySourceInterceptor) forwardFrame(raw []byte) error {
+	msg, err := protocol.Decode(raw)
+	if err != nil {
+		return err
+	}
+	switch m := msg.(type) {
+	case *protocol.FileChunk:
+		m.MsgID = r.toMsgID
+		out, err := protocol.Encode(m)
+		if err != nil {
+			return err
+		}
+		return r.toConn.SendRaw(out)
+	case *protocol.FileAbort:
+		m.MsgID = r.toMsgID
+		out, _ := protocol.Encode(m)
+		return r.toConn.SendRaw(out)
+	}
+	return nil
+}
 
 // chunkRewriter rewrites incoming FileChunk/FileAbort msg_ids and forwards
 // them to the destination node.
