@@ -1,24 +1,24 @@
-# 文件传输 + MCP 架构重构 设计
+# File Transfer + MCP Architecture Refactor — Design
 
-日期:2026-05-16
-状态:草案 → 待 user review
+Date: 2026-05-16
+Status: draft → awaiting user review
 
-## 背景与目标
+## Background and Goals
 
-Tether 当前架构:behind-firewall 设备(node)通过 WSS 主动连接公网 Hub;Hub 在 `/mcp` 暴露 HTTP/SSE MCP 端点,Claude Code 通过 HTTP MCP 调用工具,Hub 将其翻译为 CBOR 协议消息转发到目标 node。已有 7 个工具:`list_devices` / `exec` / `start_process` / `list_processes` / `get_output` / `send_stdin` / `kill_process`。
+Current Tether architecture: behind-firewall devices (nodes) hold outbound WSS connections to a public Hub; the Hub exposes an HTTP/SSE MCP endpoint at `/mcp`. Claude Code calls MCP tools over HTTP and the Hub translates those calls into CBOR protocol messages routed to the target node. Seven tools exist today: `list_devices`, `exec`, `start_process`, `list_processes`, `get_output`, `send_stdin`, `kill_process`.
 
-需求:**支持双向文件传输**,以一个 scp 风格的 `file_transfer(from, to)` MCP 工具提供。
+Requirement: **support bidirectional file transfer**, exposed as a single scp-style MCP tool `file_transfer(from, to)`.
 
-文件传输需求暴露了一个架构约束:**远程 HTTP MCP 服务端(Hub)无法读写 MCP 客户端(用户机器)上的文件**。要让「本机路径」语义成立,必须在用户机器上跑一个本地 MCP 进程。
+This requirement surfaces an architectural constraint: **a remote HTTP MCP server (the Hub) cannot read or write files on the MCP client's machine**. For "local path" semantics to work, an MCP process must run on the user's machine.
 
-本设计因此包含两部分:
+This design therefore covers two parts:
 
-1. **架构重构(Phase 1)**:废除 Hub 的 `/mcp` 端点,Hub 退化为纯 WS 消息中转;新增 `tether mcp` 子命令作为本地 stdio MCP 进程,7 个现有工具全部迁移到本地实现。
-2. **file_transfer 实现(Phase 2)**:协议层新增 6 条文件相关消息,client/hub/node 各自实现对应逻辑。
+1. **Architecture refactor (Phase 1)** — remove the Hub's `/mcp` endpoint, reduce the Hub to a pure WS message relay, and add a new `tether mcp` subcommand that runs as a local stdio MCP process. All seven existing tools move to this local implementation.
+2. **file_transfer implementation (Phase 2)** — add six file-related protocol messages and wire up client/hub/node logic.
 
-两阶段共享同一 spec,分两个实施计划独立执行。
+Both phases share this spec but ship as two independent implementation plans.
 
-## 整体架构
+## Overall Architecture
 
 ```
 ┌─────────────────────────┐                  ┌─────────────────────────┐
@@ -34,45 +34,45 @@ Tether 当前架构:behind-firewall 设备(node)通过 WSS 主动连接公网 Hu
 └─────────────────────────┘     └────────┘   └─────────────────────────┘
 ```
 
-三个组件:
+Three components:
 
-- **`tether serve`(Hub)**:纯 WS 消息中转。两类客户端连入:
-  - **node**(`/device`):执行端,注册到 device registry
-  - **client**(`/client`):控制端,跑 MCP 工具调用,注册到 client registry
-  Hub 维护两张 registry + 一张 in-flight 路由表(`msg_id → conn`),不再懂 MCP。`/mcp` 路径删除,`internal/hub/mcp.go` 整个废弃。
-- **`tether join`(node)**:基本不变,继续提供 exec / process 能力,新增 file 操作。
-- **`tether mcp`(本地,新增)**:stdio MCP server。启动时按配置连 Hub 的 `/client`,认证后保持 WS。把 MCP 工具调用翻译为 CBOR 协议消息发给 Hub,Hub 转发到目标 node,回包路由回来再转成 MCP 响应。
+- **`tether serve` (Hub)** — pure WS message relay. Two kinds of peers connect:
+  - **node** (`/device`): execution side, registered in the device registry.
+  - **client** (`/client`): control side, runs MCP tool calls, registered in the client registry.
+  The Hub maintains both registries plus an in-flight routing table (`msg_id → conn`). It no longer understands MCP. The `/mcp` path is removed and `internal/hub/mcp.go` is deleted.
+- **`tether join` (node)** — largely unchanged. Continues to provide exec / process capabilities and gains file operations.
+- **`tether mcp` (local, new)** — stdio MCP server. On startup, it dials the Hub's `/client` endpoint over WSS using configured credentials. It translates MCP tool calls into CBOR protocol messages, sends them to the Hub for routing to the target node, and turns replies back into MCP responses.
 
-**鉴权:** Hub 上 `/device` 和 `/client` 共用同一个 `token`。Hello 消息新增 `role` 字段:`"node"`(默认)或 `"client"`。MVP 不做细粒度权限,持有 token 即可调任意 node。
+**Authentication:** Hub `/device` and `/client` share a single `token`. The `Hello` message gains a `role` field: `"node"` (default) or `"client"`. MVP has no fine-grained authorization — holding the token grants access to any node.
 
-## 协议消息
+## Protocol Messages
 
-### 现有(不变)
+### Existing (unchanged)
 
-`Exec / ExecCancel / Start / Stdin / Kill / GetOutput / List / Ping / Hello / Reply / ExecOutput / ExecExit / Event / Pong`
+`Exec`, `ExecCancel`, `Start`, `Stdin`, `Kill`, `GetOutput`, `List`, `Ping`, `Hello`, `Reply`, `ExecOutput`, `ExecExit`, `Event`, `Pong`.
 
-### Hello 扩展
+### Hello extension
 
 ```go
 type Hello struct {
-    // ... 现有字段
-    Role string `cbor:"role,omitempty"`  // "node"(默认) | "client"
+    // ... existing fields
+    Role string `cbor:"role,omitempty"`  // "node" (default) | "client"
 }
 ```
 
-### 新增 6 条 file 消息
+### Six new file messages
 
 ```go
-// 下载: client → hub → node
+// Download: client → hub → node
 type FileGetOpen struct {
     Type  string `cbor:"type"`   // "file_get_open"
     MsgID string `cbor:"msg_id"`
     Path  string `cbor:"path"`
 }
-// node 回 Reply{ok:true, data:{size:int64, mode:uint32, sha256:string}}
-// 然后 node 主动 push FileChunk 直到 EOF。
+// Node replies Reply{ok:true, data:{size:int64, mode:uint32, sha256:string}},
+// then pushes FileChunk frames until EOF.
 
-// 上传: client → hub → node
+// Upload: client → hub → node
 type FilePutOpen struct {
     Type      string `cbor:"type"`   // "file_put_open"
     MsgID     string `cbor:"msg_id"`
@@ -82,10 +82,10 @@ type FilePutOpen struct {
     Overwrite bool   `cbor:"overwrite,omitempty"`
     SHA256    string `cbor:"sha256,omitempty"`
 }
-// node 回 Reply{ok:true} 表示就绪;client 开始 push FileChunk;
-// 结束后 client 发最后一帧 EOF=true;node 校验 sha256 后回最终 Reply。
+// Node replies Reply{ok:true} when ready; client pushes FileChunk frames
+// until EOF=true; node verifies sha256 and sends the final Reply.
 
-// 流式分块,关联 msg_id
+// Streaming chunk, keyed by msg_id
 type FileChunk struct {
     Type  string `cbor:"type"`   // "file_chunk"
     MsgID string `cbor:"msg_id"`
@@ -94,14 +94,14 @@ type FileChunk struct {
     EOF   bool   `cbor:"eof,omitempty"`
 }
 
-// 任一方主动取消
+// Either side aborts
 type FileAbort struct {
     Type  string `cbor:"type"`   // "file_abort"
     MsgID string `cbor:"msg_id"`
     Error string `cbor:"error"`
 }
 
-// node ↔ node: client → hub 专用,Hub 协调
+// node ↔ node: client → hub only; Hub coordinates both ends
 type FileRelay struct {
     Type      string `cbor:"type"`   // "file_relay"
     MsgID     string `cbor:"msg_id"`
@@ -112,7 +112,7 @@ type FileRelay struct {
     Overwrite bool   `cbor:"overwrite,omitempty"`
 }
 
-// 同 node 内两路径间的本机 copy
+// Same-node copy between two paths
 type FileLocalCopy struct {
     Type      string `cbor:"type"`   // "file_local_copy"
     MsgID     string `cbor:"msg_id"`
@@ -122,21 +122,21 @@ type FileLocalCopy struct {
 }
 ```
 
-### 协议要点
+### Protocol notes
 
-- **Chunk 大小**:固定 256 KB。
-- **流模型**:open 建立会话 → 单向连续 push chunks → 末帧 EOF=true。无窗口/无 ack,依赖 WS/TCP 自身的 backpressure。
-- **Hub 转发 FileChunk**:不解码 `Data` 字段,直接转发(zero-copy)。
-- **同步语义**:MCP 工具同步阻塞直到传完或 abort;不报中间进度。
-- **大小限制**:配置项 `max_file_size_bytes`(默认 5 GiB),node 在 FilePutOpen 时拒绝、下载在元数据回包阶段判断。
-- **并发限制**:每 client 同时最多 4 个 in-flight 传输(MVP 静态值)。
-- **路径规则**:必须绝对或 `~` 开头;`~` 在执行端展开。
+- **Chunk size**: fixed at 256 KB.
+- **Streaming model**: open establishes a session → unidirectional continuous chunks → final frame with `EOF=true`. No window, no acks — rely on WS/TCP backpressure.
+- **Hub forwarding of FileChunk**: the `Data` field is not decoded — frames are forwarded zero-copy.
+- **Synchronous semantics**: the MCP tool blocks until completion or abort; no intermediate progress reporting.
+- **Size limit**: config `max_file_size_bytes` (default 5 GiB). Nodes reject at `FilePutOpen`; downloads check during the metadata reply.
+- **Concurrency limit**: at most 4 in-flight transfers per client (static MVP value).
+- **Path rules**: absolute or starts with `~`; `~` is expanded on the executing side.
 
-## MCP 工具接口
+## MCP Tool Interface
 
-### 新工具 `file_transfer`
+### New tool `file_transfer`
 
-入参 schema:
+Input schema:
 
 ```jsonc
 {
@@ -146,24 +146,24 @@ type FileLocalCopy struct {
 }
 ```
 
-路径语法:
+Path syntax:
 
-- `<nodename>:/path` 或 `<nodename>:~/path` —— 该 node 上的路径
-- `/path` 或 `~/path` —— 运行 `tether mcp` 的本机(Claude Code 主机)
-- 不支持目录(单文件传输)
-- 禁止 from == to(同机同路径)
+- `<nodename>:/path` or `<nodename>:~/path` — a path on that node.
+- `/path` or `~/path` — a path on the machine running `tether mcp` (the Claude Code host).
+- Directories not supported (single file only).
+- `from == to` on the same machine is rejected.
 
-5 种组合的执行路径:
+Five routing combinations:
 
-| from | to | 实现 |
-|------|----|------|
-| local → local | 拒绝,返回 error "use os tools" |
-| local → node | client 读本地文件,push 到 node:`FilePutOpen` → 多 `FileChunk` → 最终 Reply |
-| node → local | client 从 node pull,写到本地:`FileGetOpen` → 接 chunks → 本地落盘 |
-| nodeA → nodeB | client 发 `FileRelay` 给 Hub,Hub 在两 node 间流式串接 |
-| nodeA → nodeA(同 node) | client 发 `FileLocalCopy` 给 Hub → node 本机 OS copy |
+| from | to | implementation |
+|------|----|----------------|
+| local → local | rejected, error `"use os tools"` |
+| local → node | client reads local file, pushes to node: `FilePutOpen` → multiple `FileChunk` → final `Reply` |
+| node → local | client pulls from node, writes locally: `FileGetOpen` → chunks → local fsync |
+| nodeA → nodeB | client sends `FileRelay` to Hub; Hub streams between the two nodes |
+| nodeA → nodeA (same node) | client sends `FileLocalCopy`; node performs an OS-level copy |
 
-返回值:
+Return value:
 
 ```jsonc
 {
@@ -174,130 +174,130 @@ type FileLocalCopy struct {
 }
 ```
 
-错误时 `ok: false` + `error: "..."`,常见错误码:`path_not_found` / `permission_denied` / `destination_exists` / `device_offline` / `size_limit_exceeded` / `hash_mismatch` / `disk_full` / `source_disconnected` / `dest_disconnected`。
+On failure: `ok: false` plus `error: "..."`. Common codes: `path_not_found`, `permission_denied`, `destination_exists`, `device_offline`, `size_limit_exceeded`, `hash_mismatch`, `disk_full`, `source_disconnected`, `dest_disconnected`.
 
-### 保留的其他 7 个 MCP 工具
+### Other seven MCP tools
 
-`list_devices` / `exec` / `start_process` / `list_processes` / `get_output` / `send_stdin` / `kill_process` —— 全部从 Hub 搬到 `tether mcp` 本地,逻辑等价(参数 → CBOR msg via WSS → Hub 转发 → reply → MCP response)。MVP 期间外部行为完全不变,仅传输路径调整。
+`list_devices`, `exec`, `start_process`, `list_processes`, `get_output`, `send_stdin`, `kill_process` — all moved from the Hub to the local `tether mcp` process. Behavior is preserved (params → CBOR over WSS → Hub forwards → reply → MCP response). External behavior is unchanged during MVP; only the transport path is different.
 
-## Hub Relay 流程(node↔node)
+## Hub Relay Flow (node ↔ node)
 
-Client 不能同时跟两个 node 直接对话(协议是 client↔Hub↔node 单跳),所以 Hub 需要一点协调逻辑:
+Clients cannot talk to two nodes at once (the protocol is single-hop client ↔ Hub ↔ node), so the Hub needs a small amount of coordination logic:
 
-1. 收到 client 的 `FileRelay { msg_id_X, from_node, from_path, to_node, to_path, overwrite }`
-2. Hub 给 `from_node` 发 `FileGetOpen { msg_id_A, path=from_path }`,等元数据 Reply
-3. Hub 给 `to_node` 发 `FilePutOpen { msg_id_B, path=to_path, size, sha256, overwrite }`,等就绪 Reply
-4. 进入流式状态:`from_node` 推 `FileChunk { msg_id_A, ... }` 给 Hub;Hub 改写为 `FileChunk { msg_id_B, ... }` 转发给 `to_node`
-5. 末帧 EOF 后,`to_node` 校验 sha256,回最终 Reply 给 Hub
-6. Hub 把最终 Reply 转给 client(挂在 msg_id_X 上)
-7. 任一侧 abort,Hub 取消另一侧的 in-flight,并向 client 报告
+1. Client sends `FileRelay { msg_id_X, from_node, from_path, to_node, to_path, overwrite }`.
+2. Hub sends `FileGetOpen { msg_id_A, path=from_path }` to `from_node` and awaits the metadata reply.
+3. Hub sends `FilePutOpen { msg_id_B, path=to_path, size, sha256, overwrite }` to `to_node` and awaits the ready reply.
+4. Streaming state: `from_node` pushes `FileChunk { msg_id_A, ... }` to the Hub; the Hub rewrites the msg_id and forwards `FileChunk { msg_id_B, ... }` to `to_node`.
+5. After the EOF frame, `to_node` verifies sha256 and returns the final Reply.
+6. The Hub forwards this final Reply to the client (keyed on `msg_id_X`).
+7. If either side aborts, the Hub cancels the other in-flight side and reports back to the client.
 
-Hub 是核心扇出点,但不持久化任何字节,内存只滑动 1~2 帧。
+The Hub is the fan-out point but persists no bytes — at most 1–2 chunks in flight.
 
-## 文件布局与模块边界
+## File Layout and Module Boundaries
 
 ```
 internal/
   cli/
-    serve.go            ← 改:去掉 mcp 启动
-    join.go             ← 不变
-    mcp.go              ← 新:tether mcp 子命令入口
+    serve.go            ← change: stop starting MCP
+    join.go             ← unchanged
+    mcp.go              ← new: tether mcp subcommand entry
   hub/
-    server.go           ← 改:只保留 /device /client /health
-    endpoint_ws.go      ← device_ws.go 改名,统一处理 /device 和 /client
-    registry.go         ← 改:支持两类(devices, clients)
-    router.go           ← 改:支持 sticky 路由
-    relay.go            ← 新:file_relay 协调器
-    mcp.go              ← 删
-    mcp_test.go         ← 删
-  client/               ← 新包
-    config.go           ← 本地配置(hub_url / token)
-    conn.go             ← WSS 到 Hub 的连接 + 重连
-    rpc.go              ← 请求/响应路由
+    server.go           ← change: serve /device /client /health only
+    endpoint_ws.go      ← rename of device_ws.go; handles both /device and /client
+    registry.go         ← change: two registries (devices, clients)
+    router.go           ← change: support sticky routing
+    relay.go            ← new: file_relay coordinator
+    mcp.go              ← deleted
+    mcp_test.go         ← deleted
+  client/               ← new package
+    config.go           ← local config (hub_url / token)
+    conn.go             ← WSS connection to Hub + reconnect
+    rpc.go              ← request/response routing
     mcp_server.go       ← stdio MCP server
-    tools_exec.go       ← list_devices/exec/process 类工具
-    tools_file.go       ← file_transfer 工具
+    tools_exec.go       ← list_devices / exec / process tools
+    tools_file.go       ← file_transfer tool
   node/
-    handler.go          ← 改:dispatch 新增 file 分支
-    file.go             ← 新:FileGetOpen/FilePutOpen/FileLocalCopy 处理
-    process.go / pty.go ← 不变
+    handler.go          ← change: dispatch adds file branches
+    file.go             ← new: FileGetOpen / FilePutOpen / FileLocalCopy
+    process.go / pty.go ← unchanged
   protocol/
-    messages.go         ← 加 6 条 file 消息 + Hello.Role
-    codec.go            ← 注册新类型
+    messages.go         ← add six file messages + Hello.Role
+    codec.go            ← register new types
 ```
 
-**Hub router 扩展(sticky 路由):**
-当前 router 是「msg_id → 一个 reply channel」的请求/响应模型。文件分块是多帧 + 中间没有 reply,需要新增「msg_id → 持续转发通道」的注册类型。简化做法:扩展 router 用「sticky 路由表」记录 msg_id → 对端连接,直到 EOF 或 abort 才清除。
+**Hub router extension (sticky routing):**
+The current router is a one-shot "msg_id → single reply channel" model. File chunks are multi-frame with no per-frame reply, so we add a second registration type: "msg_id → forwarding conn", which lasts until EOF or abort. Simplest implementation: a sticky table mapping `msg_id → peer conn`.
 
-**节点端原子写入(`internal/node/file.go`):**
+**Node atomic writes (`internal/node/file.go`):**
 
-- 接 `FileGetOpen`:打开文件 → 发 Reply 含元数据 → goroutine 流式读 → 分块发 `FileChunk` → EOF
-- 接 `FilePutOpen`:校验路径/overwrite/可写 → Reply{ok:true} → 收 `FileChunk` 直到 EOF → 写入并校验 sha256 → 最终 Reply
-- 接 `FileLocalCopy`:本机两路径间用 `io.Copy` + 临时文件 + 原子 rename
-- **写入策略**:先写 `<path>.tether-tmp-<msg_id>`,sha 校验通过后 `os.Rename` 到目标。失败时清理临时文件。**目标文件要么完全存在要么完全不存在**,不留半截文件。
+- `FileGetOpen` handler: open file → send Reply with metadata → spawn a goroutine to stream-read → send `FileChunk` frames → EOF.
+- `FilePutOpen` handler: validate path / overwrite / writable → `Reply{ok:true}` → receive `FileChunk` frames until EOF → write and verify sha256 → final Reply.
+- `FileLocalCopy` handler: `io.Copy` between two local paths through a temp file with atomic rename.
+- **Write strategy**: write to `<path>.tether-tmp-<msg_id>`, verify sha256, then `os.Rename` to the destination. On failure, remove the temp file. **The target file is either fully present or fully absent** — never a partial file.
 
-## 错误处理
+## Error Handling
 
-| 场景 | 表现 |
-|------|------|
-| Node 中途断线(下载)| Hub 检测到 from_node 关闭,向 client 发 `FileAbort{error:"source_disconnected"}`,client 清理已写的临时文件,MCP 工具返回 error |
-| Node 中途断线(上传)| Hub 检测到 to_node 关闭,client abort 停止 push |
-| Hub 重启 | client 和 node WSS 都断重连;in-flight 传输全部 abort(MVP 不做断点续传)|
-| Client 中途断线 | Hub 取消相关传输,通知 node 删除 `.tether-tmp-*` |
-| Disk full(node 侧)| node 写入时捕获 `ENOSPC`,发 `FileAbort{error:"disk_full"}`,清理临时文件 |
-| sha256 不匹配 | node 不 rename,删临时文件,Reply{ok:false, error:"hash_mismatch"} |
-| 路径不存在 / 权限拒绝 | open 阶段同步报错,返回 ok:false |
-| 文件大小超限 | node 在 FilePutOpen 时拒绝;下载在 FileGetOpen 元数据阶段判断 |
+| Scenario | Behavior |
+|----------|----------|
+| Node disconnects mid-download | Hub detects `from_node` close and sends `FileAbort{error:"source_disconnected"}` to client; client cleans its partial local file; MCP tool returns error |
+| Node disconnects mid-upload | Hub detects `to_node` close; client aborts and stops pushing |
+| Hub restart | Both client and node WSS connections reconnect; in-flight transfers abort (no resume in MVP) |
+| Client disconnects | Hub cancels related transfers and instructs nodes to remove `.tether-tmp-*` files |
+| Disk full on node | Node catches `ENOSPC` during write, sends `FileAbort{error:"disk_full"}`, removes temp file |
+| sha256 mismatch | Node does not rename, removes temp file, sends `Reply{ok:false, error:"hash_mismatch"}` |
+| Path missing / permission denied | Reported synchronously at the open stage, `ok:false` |
+| Size over limit | Rejected at `FilePutOpen`; for downloads, rejected at the metadata stage of `FileGetOpen` |
 
-**关键不变量:**
+**Invariants:**
 
-- 节点端目标文件**要么完全成功要么完全不存在**(失败清理临时文件)
-- Hub 不持久化任何字节,内存只有 1~2 个 chunk 的滑动窗口
-- 任何 abort 都双向传播,Hub 是扇出点
+- Node destination file is either fully written or absent (cleanup on failure).
+- Hub persists no bytes; only a 1–2 chunk sliding window in memory.
+- Aborts propagate to both sides — Hub is the fan-out point.
 
-## 测试策略
+## Testing Strategy
 
-- **协议单测**:新增消息的 CBOR encode/decode round-trip(`internal/protocol/codec_test.go` 扩展)
-- **Hub relay 单测**(`internal/hub/relay_test.go`):用两个 in-memory fake conn 模拟 from_node/to_node,验证 chunk 转发、abort 传播、msg_id 改写
-- **Node 文件单测**(`internal/node/file_test.go`):用 `t.TempDir()` 跑 FileGetOpen / FilePutOpen / FileLocalCopy,覆盖 overwrite、目标不存在、目标已存在、权限拒绝、sha 不匹配
-- **Client 工具单测**(`internal/client/tools_file_test.go`):本地 ↔ fake node 端到端
-- **e2e_test.go 扩展**:内存集群跑 `tether mcp` ↔ Hub ↔ node,完整传 ~10 MB 文件验证 sha;node↔node 路径独立验证
-- **关闭路径测试**:中途关闭 conn 验证临时文件被清理
+- **Protocol unit tests** — round-trip CBOR encode/decode for new messages (extend `internal/protocol/codec_test.go`).
+- **Hub relay unit tests** (`internal/hub/relay_test.go`) — two in-memory fake conns simulate `from_node` and `to_node`; verify chunk forwarding, abort propagation, msg_id rewriting.
+- **Node file unit tests** (`internal/node/file_test.go`) — use `t.TempDir()` to exercise `FileGetOpen`, `FilePutOpen`, `FileLocalCopy`, covering overwrite, missing target, existing target, permission denied, sha mismatch.
+- **Client tool unit tests** (`internal/client/tools_file_test.go`) — end-to-end local ↔ fake-node round trips.
+- **e2e_test.go extensions** — in the in-memory cluster, drive `tether mcp` ↔ Hub ↔ node, transfer a ~10 MB file and verify sha; cover the node↔node relay path independently.
+- **Shutdown path tests** — close conns mid-transfer and verify temp files are cleaned up.
 
-## 实施阶段
+## Implementation Phases
 
-### Phase 1:架构重构(不改外部功能)
+### Phase 1 — Architecture Refactor (no external behavior change)
 
-1. 新增 `internal/client/` 包:stdio MCP server 骨架 + WSS conn + 7 个现有工具迁移
-2. Hub:新增 `/client` endpoint,扩展 `Hello.Role`,registry 拆双表,endpoint_ws.go 统一两类客户端
-3. CLI:新增 `tether mcp` 子命令
-4. 删 `internal/hub/mcp.go` + `mcp_test.go`,`server.go` 不再挂 `/mcp`
-5. 更新 README、systemd 模板
-6. `e2e_test.go` 改为走新路径,功能等价
-7. **验收**:7 个原工具行为不变,部署方式从 HTTP MCP 改为本地 stdio MCP
+1. New `internal/client/` package: stdio MCP server skeleton + WSS conn + migrate the seven existing tools.
+2. Hub: add `/client` endpoint, extend `Hello.Role`, split the registry, unify both peer kinds in `endpoint_ws.go`.
+3. CLI: add `tether mcp` subcommand.
+4. Delete `internal/hub/mcp.go` and `mcp_test.go`; `server.go` stops mounting `/mcp`.
+5. Update README and systemd templates.
+6. Refit `e2e_test.go` to drive the new path; behavior equivalent.
+7. **Acceptance**: the seven original tools behave identically; only deployment shape changes (HTTP MCP → local stdio MCP).
 
-### Phase 2:file_transfer
+### Phase 2 — file_transfer
 
-1. `protocol/messages.go` 加 6 条 file 消息 + Codec 注册
-2. `node/file.go` 实现 FileGetOpen / FilePutOpen / FileLocalCopy
-3. `hub/router.go` 加 sticky 路由,`hub/relay.go` 实现 file_relay 协调
-4. `client/tools_file.go` 实现 MCP `file_transfer` 工具,本机读写 + 调度 5 种实际组合
-5. 端到端测试 + 中等大小压测(几百 MB)
-6. 文档 / README 更新
+1. Add six file messages and codec registrations in `protocol/`.
+2. Implement `node/file.go` (`FileGetOpen`, `FilePutOpen`, `FileLocalCopy`).
+3. Add sticky routing to `hub/router.go`; implement `hub/relay.go` for `file_relay` coordination.
+4. Implement `client/tools_file.go` — MCP `file_transfer` tool, local read/write + scheduling all five routing combinations.
+5. End-to-end tests + medium-size stress (hundreds of MB).
+6. Documentation / README updates.
 
-### 估算
+### Sizing
 
-- Phase 1:约 700~900 行新增 + 400 行删除
-- Phase 2:约 600~800 行新增
+- Phase 1: ~700–900 lines added, ~400 lines removed.
+- Phase 2: ~600–800 lines added.
 
-两期可分别合并、独立验证。
+Each phase ships and verifies independently.
 
-## 非目标(明确不做的事)
+## Non-Goals
 
-- 断点续传(Hub 重启或 conn 断开后从头开始)
-- 目录递归传输(由用户先 tar 再传)
-- 传输进度上报(同步阻塞,完成才返回)
-- 压缩(WS 自带 permessage-deflate,够用)
-- 多 token / 细粒度权限(MVP 单 token)
-- 多 client 并发到同一 Hub 的资源公平分配(MVP 先做硬上限)
-- 删除 `/mcp` 后的向后兼容(整体切换,无 deprecation 期)
+- Resumable transfer (Hub restart or conn drop forces a restart from zero).
+- Recursive directory transfer (users tar/zip first).
+- Progress reporting (synchronous, return-on-completion).
+- Compression (rely on WS `permessage-deflate`).
+- Multi-token / fine-grained authorization (MVP is single shared token).
+- Fair-sharing across concurrent clients on one Hub (MVP uses hard caps only).
+- Backwards compatibility after removing `/mcp` (single-shot switch, no deprecation window).
