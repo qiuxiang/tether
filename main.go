@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/qiuxiang/tether/internal/cli"
 )
 
-func main() {
-	os.Exit(run(os.Args, os.Stderr))
-}
+func main() { os.Exit(run(os.Args, os.Stderr)) }
 
 func run(args []string, stderr io.Writer) int {
 	if len(args) < 2 {
@@ -17,11 +17,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	switch args[1] {
 	case "serve":
-		fmt.Fprintln(stderr, "serve: not implemented")
-		return 1
+		return cli.Serve(args[2:], stderr)
 	case "join":
-		fmt.Fprintln(stderr, "join: not implemented")
-		return 1
+		return cli.Join(args[2:], stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown subcommand: %s\n", args[1])
 		return 2
