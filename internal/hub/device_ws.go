@@ -73,35 +73,56 @@ func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSessi
 	return sess, nil
 }
 
-func (s *deviceSession) run(ctx context.Context) {
-	for {
-		_, data, err := s.conn.Read(ctx)
-		if err != nil {
-			return
-		}
-		msg, err := protocol.Decode(data)
-		if err != nil {
-			log.Printf("decode from %s: %v", s.device.Hostname, err)
-			continue
-		}
-		s.device.LastSeen = time.Now()
-		s.router.Deliver(msg)
-	}
+func (s *deviceSession) SendRaw(raw []byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return s.conn.Write(ctx, websocket.MessageBinary, raw)
 }
 
-// Send marshals and writes a message to the device.
+// Send is retained for in-process call sites in hub package; encodes then
+// forwards to SendRaw.
 func (s *deviceSession) Send(msg any) error {
 	m, ok := msg.(protocol.Message)
 	if !ok {
 		return errAuth("not a protocol.Message")
 	}
-	data, err := protocol.Encode(m)
+	raw, err := protocol.Encode(m)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return s.conn.Write(ctx, websocket.MessageBinary, data)
+	return s.SendRaw(raw)
+}
+
+func (s *deviceSession) run(ctx context.Context) {
+	for {
+		_, raw, err := s.conn.Read(ctx)
+		if err != nil {
+			return
+		}
+		msg, err := protocol.Decode(raw)
+		if err != nil {
+			log.Printf("decode from %s: %v", s.device.Hostname, err)
+			continue
+		}
+		s.device.LastSeen = time.Now()
+		id := msgID(msg)
+		if id != "" {
+			s.router.Forward(id, raw)
+		}
+	}
+}
+
+// msgID extracts MsgID from messages that carry one (returns "" otherwise).
+func msgID(m protocol.Message) string {
+	switch v := m.(type) {
+	case *protocol.Reply:
+		return v.MsgID
+	case *protocol.ExecOutput:
+		return v.MsgID
+	case *protocol.ExecExit:
+		return v.MsgID
+	}
+	return ""
 }
 
 func (s *deviceSession) Close() { s.conn.Close(websocket.StatusNormalClosure, "") }

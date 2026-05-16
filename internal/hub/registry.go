@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+// PeerConn is a generic send-back interface implemented by both nodes
+// (device sessions) and clients (client sessions).
+type PeerConn interface {
+	SendRaw(raw []byte) error
+	Close()
+}
+
+// DeviceConn is kept as an alias for backwards compatibility within the package.
+// New code should use PeerConn.
+type DeviceConn = PeerConn
+
 type Device struct {
 	Hostname     string
 	OS           string
@@ -13,14 +24,8 @@ type Device struct {
 	AgentVersion string
 	ConnectedAt  time.Time
 	LastSeen     time.Time
-	// conn is set by device_ws layer; nil if offline (but we Unregister on disconnect so this is always non-nil in registry)
-	Conn DeviceConn
-}
-
-// DeviceConn is implemented by hub.deviceSession; declared here so Registry doesn't import device_ws.
-type DeviceConn interface {
-	Send(msg any) error
-	Close()
+	// Conn is set by device_ws layer; nil if offline (but we Unregister on disconnect so this is always non-nil in registry)
+	Conn PeerConn
 }
 
 type Registry struct {
@@ -63,4 +68,31 @@ func (r *Registry) List() []*Device {
 		out = append(out, d)
 	}
 	return out
+}
+
+type Client struct {
+	ID          string
+	ConnectedAt time.Time
+	Conn        PeerConn
+}
+
+type ClientRegistry struct {
+	mu      sync.RWMutex
+	clients map[string]*Client
+}
+
+func NewClientRegistry() *ClientRegistry {
+	return &ClientRegistry{clients: make(map[string]*Client)}
+}
+
+func (r *ClientRegistry) Register(c *Client) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clients[c.ID] = c
+}
+
+func (r *ClientRegistry) Unregister(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.clients, id)
 }

@@ -1,76 +1,65 @@
 package hub
 
-import (
-	"sync"
+import "sync"
 
-	"github.com/qiuxiang/tether/internal/protocol"
-)
-
-// Router correlates Reply messages back to the goroutine that sent the request.
-// It also fans ExecOutput/ExecExit chunks for streaming RPCs.
+// Router maps msg_id → destination peer conn. Used to route replies and
+// streamed messages back from a node to the originating client.
+//
+// One-shot routes are removed after the first delivery; sticky routes stay
+// until explicitly unregistered (used for streamed RPCs and file transfers).
 type Router struct {
-	mu      sync.Mutex
-	replies map[string]chan *protocol.Reply
-	streams map[string]chan protocol.Message // ExecOutput, ExecExit
+	mu     sync.Mutex
+	routes map[string]route
+}
+
+type route struct {
+	Conn   PeerConn
+	Sticky bool
 }
 
 func NewRouter() *Router {
-	return &Router{
-		replies: make(map[string]chan *protocol.Reply),
-		streams: make(map[string]chan protocol.Message),
-	}
+	return &Router{routes: make(map[string]route)}
 }
 
-func (r *Router) Register(msgID string) chan *protocol.Reply {
-	ch := make(chan *protocol.Reply, 1)
+// Register associates msg_id with the peer that should receive the reply.
+// sticky=true keeps the route alive after Forward; sticky=false removes it
+// on first Forward.
+func (r *Router) Register(msgID string, conn PeerConn, sticky bool) {
 	r.mu.Lock()
-	r.replies[msgID] = ch
+	r.routes[msgID] = route{Conn: conn, Sticky: sticky}
 	r.mu.Unlock()
-	return ch
-}
-
-func (r *Router) RegisterStream(msgID string) chan protocol.Message {
-	ch := make(chan protocol.Message, 32)
-	r.mu.Lock()
-	r.streams[msgID] = ch
-	r.mu.Unlock()
-	return ch
 }
 
 func (r *Router) Unregister(msgID string) {
 	r.mu.Lock()
-	delete(r.replies, msgID)
-	delete(r.streams, msgID)
+	delete(r.routes, msgID)
 	r.mu.Unlock()
 }
 
-func (r *Router) Deliver(msg protocol.Message) {
-	switch m := msg.(type) {
-	case *protocol.Reply:
-		r.mu.Lock()
-		ch, ok := r.replies[m.MsgID]
-		r.mu.Unlock()
-		if ok {
-			select {
-			case ch <- m:
-			default:
-			}
-		}
-	case *protocol.ExecOutput:
-		r.mu.Lock()
-		ch, ok := r.streams[m.MsgID]
-		r.mu.Unlock()
-		if ok {
-			ch <- m
-		}
-	case *protocol.ExecExit:
-		r.mu.Lock()
-		ch, ok := r.streams[m.MsgID]
-		r.mu.Unlock()
-		if ok {
-			ch <- m
-			close(ch)
-			r.Unregister(m.MsgID)
-		}
+// Forward writes raw bytes to the peer registered under msg_id. Returns
+// true if a route existed. Removes the route if it was one-shot.
+func (r *Router) Forward(msgID string, raw []byte) bool {
+	r.mu.Lock()
+	rt, ok := r.routes[msgID]
+	if ok && !rt.Sticky {
+		delete(r.routes, msgID)
 	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	_ = rt.Conn.SendRaw(raw)
+	return true
+}
+
+// Lookup returns the conn for msg_id without removing it (used to inspect
+// sticky routes when deciding what to do).
+func (r *Router) Lookup(msgID string) (PeerConn, bool) {
+	r.mu.Lock()
+	rt, ok := r.routes[msgID]
+	r.mu.Unlock()
+	if !ok {
+		return nil, false
+	}
+	return rt.Conn, true
 }

@@ -2,32 +2,45 @@ package hub
 
 import (
 	"testing"
-	"time"
 
-	"github.com/qiuxiang/tether/internal/protocol"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestRouterRoundtrip(t *testing.T) {
-	r := NewRouter()
-	ch := r.Register("abc")
-	defer r.Unregister("abc")
-
-	go func() {
-		r.Deliver(&protocol.Reply{MsgID: "abc", OK: true, Data: map[string]any{"x": 1}})
-	}()
-
-	select {
-	case msg := <-ch:
-		assert.Equal(t, "abc", msg.MsgID)
-		assert.True(t, msg.OK)
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
-	}
+type fakeConn struct {
+	sent   [][]byte
+	closed bool
 }
 
-func TestRouterUnknownMsgID(t *testing.T) {
+func (f *fakeConn) SendRaw(raw []byte) error { f.sent = append(f.sent, raw); return nil }
+func (f *fakeConn) Close()                   { f.closed = true }
+
+func TestRouterOneShot(t *testing.T) {
 	r := NewRouter()
-	// Should not panic.
-	r.Deliver(&protocol.Reply{MsgID: "nope"})
+	c := &fakeConn{}
+	r.Register("m1", c, false)
+	ok := r.Forward("m1", []byte("hello"))
+	require.True(t, ok)
+	require.Len(t, c.sent, 1)
+
+	// Second Forward should miss — route removed.
+	ok = r.Forward("m1", []byte("again"))
+	assert.False(t, ok)
+}
+
+func TestRouterSticky(t *testing.T) {
+	r := NewRouter()
+	c := &fakeConn{}
+	r.Register("m2", c, true)
+	require.True(t, r.Forward("m2", []byte("a")))
+	require.True(t, r.Forward("m2", []byte("b")))
+	require.Len(t, c.sent, 2)
+
+	r.Unregister("m2")
+	assert.False(t, r.Forward("m2", []byte("c")))
+}
+
+func TestRouterMissingMsgID(t *testing.T) {
+	r := NewRouter()
+	assert.False(t, r.Forward("nope", []byte("x")))
 }

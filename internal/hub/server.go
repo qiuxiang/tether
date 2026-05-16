@@ -35,6 +35,14 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// mcpHandler is a stub. The real implementation lives in mcp.go; that file is
+// temporarily excluded via //go:build ignore until Task 4 deletes it.
+func (s *Server) mcpHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "mcp not available", http.StatusNotImplemented)
+	})
+}
+
 func (s *Server) authMCP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := r.Header.Get("Authorization")
