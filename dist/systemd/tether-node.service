@@ -1,0 +1,12 @@
+[Unit]
+Description=Tether node (device-side agent)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tether join --config %h/.config/tether/config.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

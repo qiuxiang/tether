@@ -1,0 +1,12 @@
+[Unit]
+Description=Tether hub (remote env relay + MCP server)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tether serve --config /etc/tether/config.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
