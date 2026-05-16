@@ -4,6 +4,7 @@ package protocol
 type Exec struct {
 	Type      string            `cbor:"type"`
 	MsgID     string            `cbor:"msg_id"`
+	Target    string            `cbor:"target,omitempty"`
 	Cmd       []string          `cbor:"cmd"`
 	Cwd       string            `cbor:"cwd,omitempty"`
 	Env       map[string]string `cbor:"env,omitempty"`
@@ -13,13 +14,15 @@ type Exec struct {
 }
 
 type ExecCancel struct {
-	Type  string `cbor:"type"`
-	MsgID string `cbor:"msg_id"`
+	Type   string `cbor:"type"`
+	MsgID  string `cbor:"msg_id"`
+	Target string `cbor:"target,omitempty"`
 }
 
 type Start struct {
 	Type      string            `cbor:"type"`
 	MsgID     string            `cbor:"msg_id"`
+	Target    string            `cbor:"target,omitempty"`
 	ProcessID string            `cbor:"process_id"`
 	Cmd       []string          `cbor:"cmd"`
 	Cwd       string            `cbor:"cwd,omitempty"`
@@ -30,6 +33,7 @@ type Start struct {
 
 type Stdin struct {
 	Type      string `cbor:"type"`
+	Target    string `cbor:"target,omitempty"`
 	ProcessID string `cbor:"process_id"`
 	Data      []byte `cbor:"data"`
 }
@@ -37,6 +41,7 @@ type Stdin struct {
 type Kill struct {
 	Type      string `cbor:"type"`
 	MsgID     string `cbor:"msg_id"`
+	Target    string `cbor:"target,omitempty"`
 	ProcessID string `cbor:"process_id"`
 	Signal    string `cbor:"signal,omitempty"`
 }
@@ -44,6 +49,7 @@ type Kill struct {
 type GetOutput struct {
 	Type      string `cbor:"type"`
 	MsgID     string `cbor:"msg_id"`
+	Target    string `cbor:"target,omitempty"`
 	ProcessID string `cbor:"process_id"`
 	Offset    int64  `cbor:"offset,omitempty"`
 	Length    int    `cbor:"length,omitempty"`
@@ -52,6 +58,7 @@ type GetOutput struct {
 type List struct {
 	Type         string `cbor:"type"`
 	MsgID        string `cbor:"msg_id"`
+	Target       string `cbor:"target,omitempty"`
 	StatusFilter string `cbor:"status_filter,omitempty"`
 	Limit        int    `cbor:"limit,omitempty"`
 }
@@ -68,6 +75,7 @@ type Hello struct {
 	Arch         string `cbor:"arch"`
 	AgentVersion string `cbor:"agent_version"`
 	Token        string `cbor:"token"`
+	Role         string `cbor:"role,omitempty"` // "node" (default) | "client"
 }
 
 type Reply struct {
@@ -103,22 +111,29 @@ type Pong struct {
 	Type string `cbor:"type"`
 }
 
+// ListDevices is a hub-local request (no Target).
+type ListDevices struct {
+	Type  string `cbor:"type"`
+	MsgID string `cbor:"msg_id"`
+}
+
 // Marker interface for any message.
 type Message interface {
 	msgType() string
 }
 
-func (m *Exec) msgType() string       { return "exec" }
-func (m *ExecCancel) msgType() string { return "exec_cancel" }
-func (m *Start) msgType() string      { return "start" }
-func (m *Stdin) msgType() string      { return "stdin" }
-func (m *Kill) msgType() string       { return "kill" }
-func (m *GetOutput) msgType() string  { return "get_output" }
-func (m *List) msgType() string       { return "list" }
-func (m *Ping) msgType() string       { return "ping" }
-func (m *Hello) msgType() string      { return "hello" }
-func (m *Reply) msgType() string      { return "reply" }
-func (m *ExecOutput) msgType() string { return "exec_output" }
-func (m *ExecExit) msgType() string   { return "exec_exit" }
-func (m *Event) msgType() string      { return "event" }
-func (m *Pong) msgType() string       { return "pong" }
+func (m *Exec) msgType() string        { return "exec" }
+func (m *ExecCancel) msgType() string  { return "exec_cancel" }
+func (m *Start) msgType() string       { return "start" }
+func (m *Stdin) msgType() string       { return "stdin" }
+func (m *Kill) msgType() string        { return "kill" }
+func (m *GetOutput) msgType() string   { return "get_output" }
+func (m *List) msgType() string        { return "list" }
+func (m *ListDevices) msgType() string { return "list_devices" }
+func (m *Ping) msgType() string        { return "ping" }
+func (m *Hello) msgType() string       { return "hello" }
+func (m *Reply) msgType() string       { return "reply" }
+func (m *ExecOutput) msgType() string  { return "exec_output" }
+func (m *ExecExit) msgType() string    { return "exec_exit" }
+func (m *Event) msgType() string       { return "event" }
+func (m *Pong) msgType() string        { return "pong" }

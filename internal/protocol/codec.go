@@ -49,6 +49,8 @@ func setType(m Message) {
 		v.Type = m.msgType()
 	case *List:
 		v.Type = m.msgType()
+	case *ListDevices:
+		v.Type = m.msgType()
 	case *Ping:
 		v.Type = m.msgType()
 	case *Hello:
@@ -90,6 +92,8 @@ func Decode(data []byte) (Message, error) {
 		m = &GetOutput{}
 	case "list":
 		m = &List{}
+	case "list_devices":
+		m = &ListDevices{}
 	case "ping":
 		m = &Ping{}
 	case "hello":

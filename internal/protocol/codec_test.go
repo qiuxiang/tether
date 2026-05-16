@@ -3,6 +3,8 @@ package protocol
 import (
 	"bytes"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestEncodeDecodeHello(t *testing.T) {
@@ -46,4 +48,39 @@ func TestDecodeUnknownType(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown type")
 	}
+}
+
+func TestRoundTripListDevices(t *testing.T) {
+	in := &ListDevices{MsgID: "abc"}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*ListDevices)
+	require.True(t, ok)
+	require.Equal(t, "abc", got.MsgID)
+	require.Equal(t, "list_devices", got.Type)
+}
+
+func TestRoundTripExecWithTarget(t *testing.T) {
+	in := &Exec{MsgID: "m1", Target: "host-a", Cmd: []string{"sh", "-c", "ls"}}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*Exec)
+	require.True(t, ok)
+	require.Equal(t, "host-a", got.Target)
+	require.Equal(t, "m1", got.MsgID)
+}
+
+func TestRoundTripHelloRole(t *testing.T) {
+	in := &Hello{Hostname: "c1", Token: "t", Role: "client"}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*Hello)
+	require.True(t, ok)
+	require.Equal(t, "client", got.Role)
 }
