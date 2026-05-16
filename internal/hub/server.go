@@ -11,13 +11,16 @@ type Options struct {
 type Server struct {
 	opts     Options
 	registry *Registry
+	router   *Router
 }
 
 func NewServer(opts Options) *Server {
-	return &Server{opts: opts, registry: NewRegistry()}
+	return &Server{opts: opts, registry: NewRegistry(), router: NewRouter()}
 }
 
 func (s *Server) Registry() *Registry { return s.registry }
+
+func (s *Server) Router() *Router { return s.router }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()

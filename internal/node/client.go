@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math/rand"
 	"runtime"
@@ -21,11 +22,20 @@ type Config struct {
 	ReconnectMax time.Duration
 }
 
+type Handler interface {
+	Handle(ctx context.Context, send Sender, msg protocol.Message)
+}
+
+type Sender interface {
+	Send(msg protocol.Message) error
+}
+
 type Client struct {
-	mu   sync.Mutex
-	cfg  Config
-	conn *websocket.Conn
-	url  string
+	mu      sync.Mutex
+	cfg     Config
+	conn    *websocket.Conn
+	url     string
+	handler Handler
 }
 
 func New(cfg Config) *Client {
@@ -45,6 +55,25 @@ func (c *Client) SetURL(url string) {
 	c.mu.Lock()
 	c.url = url
 	c.mu.Unlock()
+}
+
+func (c *Client) SetHandler(h Handler) { c.handler = h }
+
+// Send implements the Sender interface — handlers use it to reply to the hub.
+func (c *Client) Send(msg protocol.Message) error {
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn == nil {
+		return errors.New("not connected")
+	}
+	data, err := protocol.Encode(msg)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return conn.Write(ctx, websocket.MessageBinary, data)
 }
 
 func (c *Client) Run(ctx context.Context) {
@@ -96,11 +125,18 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	c.conn = conn
 	c.mu.Unlock()
 
-	// Read loop — Task 6 adds dispatch.
 	for {
-		_, _, err := conn.Read(ctx)
+		_, data, err := conn.Read(ctx)
 		if err != nil {
 			return err
+		}
+		msg, err := protocol.Decode(data)
+		if err != nil {
+			log.Printf("decode: %v", err)
+			continue
+		}
+		if c.handler != nil {
+			go c.handler.Handle(ctx, c, msg)
 		}
 	}
 }

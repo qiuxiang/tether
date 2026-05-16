@@ -32,6 +32,7 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 type deviceSession struct {
 	device *Device
 	conn   *websocket.Conn
+	router *Router
 }
 
 func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSession, error) {
@@ -60,7 +61,7 @@ func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSessi
 		ConnectedAt:  time.Now(),
 		LastSeen:     time.Now(),
 	}
-	sess := &deviceSession{device: d, conn: c}
+	sess := &deviceSession{device: d, conn: c, router: s.router}
 	d.Conn = sess
 	if err := s.registry.Register(d); err != nil {
 		return nil, err
@@ -69,12 +70,18 @@ func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSessi
 }
 
 func (s *deviceSession) run(ctx context.Context) {
-	// In Task 6 we'll add inbound message dispatch. For now just hold the connection open.
 	for {
-		_, _, err := s.conn.Read(ctx)
+		_, data, err := s.conn.Read(ctx)
 		if err != nil {
 			return
 		}
+		msg, err := protocol.Decode(data)
+		if err != nil {
+			log.Printf("decode from %s: %v", s.device.Hostname, err)
+			continue
+		}
+		s.device.LastSeen = time.Now()
+		s.router.Deliver(msg)
 	}
 }
 
