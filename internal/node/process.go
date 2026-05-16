@@ -107,11 +107,6 @@ func (p *Process) startPipe(ctx context.Context, logDir string, env map[string]s
 	return nil
 }
 
-// Stub: real implementation lands in Task 9.
-func (p *Process) startPTY(ctx context.Context, logDir string, env map[string]string, cwd string, onExit func(code int)) error {
-	return fmt.Errorf("tty not yet supported")
-}
-
 func pumpStdin(w io.WriteCloser, ch <-chan []byte) {
 	defer w.Close()
 	for data := range ch {
@@ -223,11 +218,6 @@ func streamReader(r io.Reader, stream, msgID string, send Sender, wg *sync.WaitG
 			return
 		}
 	}
-}
-
-// Stub: real PTY implementation lands in Task 9.
-func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, error) {
-	return -1, fmt.Errorf("tty not yet supported")
 }
 
 // ReadOutput returns log bytes starting at offset, up to length. eof=true when
