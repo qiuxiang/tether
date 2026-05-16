@@ -9,18 +9,20 @@ import (
 )
 
 type ProcessHandler struct {
-	registry   *ProcessRegistry
-	logDir     string
-	mu         sync.Mutex
-	execMu     sync.Mutex
-	execCancel map[string]context.CancelFunc
+	registry    *ProcessRegistry
+	logDir      string
+	mu          sync.Mutex
+	execMu      sync.Mutex
+	execCancel  map[string]context.CancelFunc
+	fileHandler *FileHandler
 }
 
 func NewProcessHandler(logDir string, cap int) *ProcessHandler {
 	return &ProcessHandler{
-		registry:   NewProcessRegistry(cap),
-		logDir:     logDir,
-		execCancel: make(map[string]context.CancelFunc),
+		registry:    NewProcessRegistry(cap),
+		logDir:      logDir,
+		execCancel:  make(map[string]context.CancelFunc),
+		fileHandler: NewFileHandler(),
 	}
 }
 
@@ -40,6 +42,9 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 		go h.handleExec(send, m)
 	case *protocol.ExecCancel:
 		h.handleExecCancel(m)
+	case *protocol.FilePutOpen, *protocol.FileChunk, *protocol.FileAbort,
+		*protocol.FileGetOpen, *protocol.FileLocalCopy:
+		h.fileHandler.Handle(send, msg)
 	}
 }
 
