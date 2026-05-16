@@ -69,6 +69,27 @@ func (echoHandler) Handle(ctx context.Context, send Sender, msg protocol.Message
 	}
 }
 
+// replyCapture implements hub.PeerConn for tests — decodes Reply frames
+// and pushes them onto a channel.
+type replyCapture struct {
+	ch chan *protocol.Reply
+}
+
+func (r *replyCapture) SendRaw(raw []byte) error {
+	msg, err := protocol.Decode(raw)
+	if err != nil {
+		return nil
+	}
+	if reply, ok := msg.(*protocol.Reply); ok {
+		select {
+		case r.ch <- reply:
+		default:
+		}
+	}
+	return nil
+}
+func (r *replyCapture) Close() {}
+
 func TestRequestReplyRoundtrip(t *testing.T) {
 	s := hub.NewServer(hub.Options{Token: "secret"})
 	ts := httptest.NewServer(s.Handler())
@@ -92,14 +113,18 @@ func TestRequestReplyRoundtrip(t *testing.T) {
 		return ok
 	}, 2*time.Second, 20*time.Millisecond)
 
-	// Send a List request via the deviceSession.
 	msgID := "test-1"
-	reply := s.Router().Register(msgID)
+	capture := &replyCapture{ch: make(chan *protocol.Reply, 1)}
+	s.Router().Register(msgID, capture, false)
 	defer s.Router().Unregister(msgID)
-	require.NoError(t, dev.Conn.Send(&protocol.List{MsgID: msgID}))
+
+	req := &protocol.List{MsgID: msgID}
+	raw, err := protocol.Encode(req)
+	require.NoError(t, err)
+	require.NoError(t, dev.Conn.SendRaw(raw))
 
 	select {
-	case r := <-reply:
+	case r := <-capture.ch:
 		assert.True(t, r.OK)
 		assert.Equal(t, "list", r.Data["echo"])
 	case <-time.After(2 * time.Second):
