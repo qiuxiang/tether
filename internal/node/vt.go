@@ -11,6 +11,11 @@ import (
 const (
 	vtCols = 200
 	vtRows = 10000
+	// ptyVisibleRows is what TIOCGWINSZ reports to the child process. Smaller
+	// than vtRows so curses programs (nethack, htop, top) get a normal-sized
+	// canvas, while the wider VT continues to accumulate scrollback as the
+	// program prints past the visible bottom.
+	ptyVisibleRows = 50
 )
 
 // vtSink is an io.Writer that forwards bytes into a Process's VT under vtMu.

@@ -100,6 +100,11 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 		logFile.Close()
 		return err
 	}
+	if err := p.Resize(vtCols, ptyVisibleRows); err != nil {
+		p.Close()
+		logFile.Close()
+		return err
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	c := p.CommandContext(ctx, proc.Cmd[0], proc.Cmd[1:]...)

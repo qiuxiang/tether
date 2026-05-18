@@ -25,6 +25,29 @@ func TestStartPTY_FeedsVT(t *testing.T) {
 	}
 }
 
+func TestStartPTY_WinSize(t *testing.T) {
+	dir := t.TempDir()
+	p := &Process{ID: "vt-winsize", Cmd: []string{"sh", "-c", "stty size"}}
+	done := make(chan struct{})
+	if err := p.Start(context.Background(), dir, nil, "", true, func(code int) { close(done) }); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	lines, _, _, _ := p.CaptureScreen(nil, nil)
+	want := "50 200"
+	found := false
+	for _, l := range lines {
+		if strings.TrimSpace(l) == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected stty size %q in output, got lines=%q", want, lines)
+	}
+}
+
 func TestExecPTYTtyDetected(t *testing.T) {
 	send := &captureSender{msgs: make(chan protocol.Message, 16)}
 	h := NewProcessHandler(t.TempDir(), 50)
