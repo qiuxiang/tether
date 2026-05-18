@@ -224,48 +224,6 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 		},
 	)
 
-	// get_output
-	m.AddTool(
-		mcp.NewTool("get_output",
-			mcp.WithDescription("Read log bytes from a process by offset."),
-			mcp.WithString("device", mcp.Required()),
-			mcp.WithString("process_id", mcp.Required()),
-			mcp.WithNumber("offset"),
-			mcp.WithNumber("length"),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			args := req.GetArguments()
-			device, _ := args["device"].(string)
-			pid, _ := args["process_id"].(string)
-			var offset int64
-			if o, ok := args["offset"].(float64); ok {
-				offset = int64(o)
-			}
-			length := 65536
-			if l, ok := args["length"].(float64); ok {
-				length = int(l)
-			}
-			id := NewMsgID()
-			ch := c.rpc.Register(id)
-			defer c.rpc.Unregister(id)
-			if err := c.Send(&protocol.GetOutput{MsgID: id, Target: device, ProcessID: pid, Offset: offset, Length: length}); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			select {
-			case reply := <-ch:
-				if !reply.OK {
-					return mcp.NewToolResultError(reply.Error), nil
-				}
-				b, _ := json.Marshal(reply.Data)
-				return mcp.NewToolResultText(string(b)), nil
-			case <-time.After(defaultRPCTimeout):
-				return mcp.NewToolResultError("timeout"), nil
-			case <-ctx.Done():
-				return mcp.NewToolResultError(ctx.Err().Error()), nil
-			}
-		},
-	)
-
 	// capture_screen
 	m.AddTool(
 		mcp.NewTool("capture_screen",

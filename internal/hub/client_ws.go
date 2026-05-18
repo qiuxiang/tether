@@ -114,7 +114,7 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 		cs.forwardFireAndForget(m.Target, raw)
 	case *protocol.Kill:
 		cs.routeOneShot(m.MsgID, m.Target, raw)
-	case *protocol.GetOutput:
+	case *protocol.CaptureScreen:
 		cs.routeOneShot(m.MsgID, m.Target, raw)
 	case *protocol.List:
 		cs.routeOneShot(m.MsgID, m.Target, raw)

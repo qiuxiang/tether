@@ -240,36 +240,3 @@ func streamReader(r io.Reader, stream, msgID string, send Sender, wg *sync.WaitG
 	}
 }
 
-// ReadOutput returns log bytes starting at offset, up to length. eof=true when
-// the process has exited AND we've returned everything up to current file size.
-func (p *Process) ReadOutput(offset int64, length int) ([]byte, int64, bool, error) {
-	if p.LogPath == "" {
-		return nil, 0, false, fmt.Errorf("no log")
-	}
-	f, err := os.Open(p.LogPath)
-	if err != nil {
-		return nil, 0, false, err
-	}
-	defer f.Close()
-	stat, _ := f.Stat()
-	size := stat.Size()
-	if offset >= size {
-		p.mu.Lock()
-		exited := p.Status == "exited"
-		p.mu.Unlock()
-		return nil, offset, exited, nil
-	}
-	if length <= 0 || length > 1<<20 {
-		length = 65536
-	}
-	buf := make([]byte, length)
-	n, err := f.ReadAt(buf, offset)
-	if err != nil && err != io.EOF {
-		return nil, offset, false, err
-	}
-	next := offset + int64(n)
-	p.mu.Lock()
-	exited := p.Status == "exited" && next >= size
-	p.mu.Unlock()
-	return buf[:n], next, exited, nil
-}

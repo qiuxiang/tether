@@ -34,8 +34,6 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 		h.handleKill(send, m)
 	case *protocol.Stdin:
 		h.handleStdin(m)
-	case *protocol.GetOutput:
-		h.handleGetOutput(send, m)
 	case *protocol.CaptureScreen:
 		h.handleCaptureScreen(send, m)
 	case *protocol.List:
@@ -80,22 +78,6 @@ func (h *ProcessHandler) handleStdin(m *protocol.Stdin) {
 	if p, ok := h.registry.Get(m.ProcessID); ok {
 		_ = p.WriteStdin(m.Data)
 	}
-}
-
-func (h *ProcessHandler) handleGetOutput(send Sender, m *protocol.GetOutput) {
-	p, ok := h.registry.Get(m.ProcessID)
-	if !ok {
-		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not found"})
-		return
-	}
-	data, next, eof, err := p.ReadOutput(m.Offset, m.Length)
-	if err != nil {
-		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
-		return
-	}
-	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
-		"data": data, "next_offset": next, "eof": eof,
-	}})
 }
 
 func (h *ProcessHandler) handleCaptureScreen(send Sender, m *protocol.CaptureScreen) {

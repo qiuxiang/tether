@@ -46,15 +46,6 @@ type Kill struct {
 	Signal    string `cbor:"signal,omitempty"`
 }
 
-type GetOutput struct {
-	Type      string `cbor:"type"`
-	MsgID     string `cbor:"msg_id"`
-	Target    string `cbor:"target,omitempty"`
-	ProcessID string `cbor:"process_id"`
-	Offset    int64  `cbor:"offset,omitempty"`
-	Length    int    `cbor:"length,omitempty"`
-}
-
 // CaptureScreen requests the rendered terminal screen of a process.
 // StartLine/EndLine use tmux semantics: negative indices count from the end,
 // nil means "extreme" (start = top of scrollback, end = current last line).
@@ -192,7 +183,6 @@ func (m *ExecCancel) msgType() string  { return "exec_cancel" }
 func (m *Start) msgType() string       { return "start" }
 func (m *Stdin) msgType() string       { return "stdin" }
 func (m *Kill) msgType() string        { return "kill" }
-func (m *GetOutput) msgType() string      { return "get_output" }
 func (m *CaptureScreen) msgType() string  { return "capture_screen" }
 func (m *List) msgType() string        { return "list" }
 func (m *ListDevices) msgType() string { return "list_devices" }
