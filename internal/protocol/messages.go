@@ -55,6 +55,18 @@ type GetOutput struct {
 	Length    int    `cbor:"length,omitempty"`
 }
 
+// CaptureScreen requests the rendered terminal screen of a process.
+// StartLine/EndLine use tmux semantics: negative indices count from the end,
+// nil means "extreme" (start = top of scrollback, end = current last line).
+type CaptureScreen struct {
+	Type      string `cbor:"type"`
+	MsgID     string `cbor:"msg_id"`
+	Target    string `cbor:"target,omitempty"`
+	ProcessID string `cbor:"process_id"`
+	StartLine *int   `cbor:"start_line,omitempty"`
+	EndLine   *int   `cbor:"end_line,omitempty"`
+}
+
 type List struct {
 	Type         string `cbor:"type"`
 	MsgID        string `cbor:"msg_id"`
@@ -180,7 +192,8 @@ func (m *ExecCancel) msgType() string  { return "exec_cancel" }
 func (m *Start) msgType() string       { return "start" }
 func (m *Stdin) msgType() string       { return "stdin" }
 func (m *Kill) msgType() string        { return "kill" }
-func (m *GetOutput) msgType() string   { return "get_output" }
+func (m *GetOutput) msgType() string      { return "get_output" }
+func (m *CaptureScreen) msgType() string  { return "capture_screen" }
 func (m *List) msgType() string        { return "list" }
 func (m *ListDevices) msgType() string { return "list_devices" }
 func (m *Hello) msgType() string       { return "hello" }

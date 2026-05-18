@@ -52,6 +52,8 @@ func setType(m Message) {
 		v.Type = m.msgType()
 	case *GetOutput:
 		v.Type = m.msgType()
+	case *CaptureScreen:
+		v.Type = m.msgType()
 	case *List:
 		v.Type = m.msgType()
 	case *ListDevices:
@@ -103,6 +105,8 @@ func Decode(data []byte) (Message, error) {
 		m = &Kill{}
 	case "get_output":
 		m = &GetOutput{}
+	case "capture_screen":
+		m = &CaptureScreen{}
 	case "list":
 		m = &List{}
 	case "list_devices":

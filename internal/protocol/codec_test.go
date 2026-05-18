@@ -122,3 +122,37 @@ func TestRoundTripFileRelay(t *testing.T) {
 	require.Equal(t, "a", got.FromNode)
 	require.Equal(t, "/b", got.ToPath)
 }
+
+func TestRoundTripCaptureScreen(t *testing.T) {
+	start, end := -10, -1
+	cases := []*CaptureScreen{
+		{MsgID: "m1", Target: "node1", ProcessID: "p1", StartLine: &start, EndLine: &end},
+		{MsgID: "m2", Target: "node2", ProcessID: "p2", StartLine: nil, EndLine: nil},
+	}
+	for _, m := range cases {
+		raw, err := Encode(m)
+		if err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		decoded, err := Decode(raw)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		got, ok := decoded.(*CaptureScreen)
+		if !ok {
+			t.Fatalf("decoded type: %T", decoded)
+		}
+		if got.MsgID != m.MsgID || got.Target != m.Target || got.ProcessID != m.ProcessID {
+			t.Fatalf("mismatch: %+v vs %+v", got, m)
+		}
+		if (got.StartLine == nil) != (m.StartLine == nil) || (got.EndLine == nil) != (m.EndLine == nil) {
+			t.Fatalf("nil mismatch: got %v %v vs %v %v", got.StartLine, got.EndLine, m.StartLine, m.EndLine)
+		}
+		if m.StartLine != nil && *got.StartLine != *m.StartLine {
+			t.Fatalf("StartLine: %d vs %d", *got.StartLine, *m.StartLine)
+		}
+		if m.EndLine != nil && *got.EndLine != *m.EndLine {
+			t.Fatalf("EndLine: %d vs %d", *got.EndLine, *m.EndLine)
+		}
+	}
+}
