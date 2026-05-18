@@ -8,7 +8,7 @@ A relay service that exposes behind-firewall devices (mac/linux/windows) to AI t
 make build
 ```
 
-Produces `./tether` (single binary, two subcommands).
+Produces `./tether` (single binary, three subcommands: `serve`, `join`, `mcp`).
 
 ## Run the hub (public-net machine)
 
@@ -33,11 +33,13 @@ Create `~/.config/tether/config.yaml`:
 ```yaml
 hub_url: "wss://tether.example.com/device"
 token: "your-secret-token"
+hostname_override: ""                          # defaults to os.Hostname()
+log_dir: "~/.local/share/tether/logs"          # per-process log files live here
 ```
 
 Run: `./tether join`
 
-The node will connect, register, and accept commands from the hub.
+The node will connect, register, and accept commands from the hub. Processes are always launched inside a PTY (200×50 reported to the child, 200×10000 scrollback buffered for `capture_screen`).
 
 ## Run the MCP client (your local machine)
 
@@ -48,7 +50,7 @@ hub_url: "wss://tether.example.com/client"
 token: "your-secret-token"
 ```
 
-The `tether mcp` subcommand runs a stdio MCP server that connects to the hub.
+The `tether mcp` subcommand runs a stdio MCP server that holds an outbound WSS connection to the hub's `/client` endpoint and translates MCP tool calls into hub-routed requests.
 
 ## Wire up Claude Code
 
