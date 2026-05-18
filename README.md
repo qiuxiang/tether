@@ -63,7 +63,7 @@ The `tether mcp` subcommand runs a stdio MCP server that connects to the hub.
 }
 ```
 
-8 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `get_output`, `send_stdin`, `kill_process`, `file_transfer`.
+8 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `capture_screen`, `send_stdin`, `kill_process`, `file_transfer`.
 
 ### file_transfer
 
