@@ -36,6 +36,8 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 		h.handleStdin(m)
 	case *protocol.GetOutput:
 		h.handleGetOutput(send, m)
+	case *protocol.CaptureScreen:
+		h.handleCaptureScreen(send, m)
 	case *protocol.List:
 		h.handleList(send, m)
 	case *protocol.Exec:
@@ -93,6 +95,21 @@ func (h *ProcessHandler) handleGetOutput(send Sender, m *protocol.GetOutput) {
 	}
 	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
 		"data": data, "next_offset": next, "eof": eof,
+	}})
+}
+
+func (h *ProcessHandler) handleCaptureScreen(send Sender, m *protocol.CaptureScreen) {
+	p, ok := h.registry.Get(m.ProcessID)
+	if !ok {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "process not found"})
+		return
+	}
+	lines, row, col, total := p.CaptureScreen(m.StartLine, m.EndLine)
+	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
+		"lines":       lines,
+		"cursor":      map[string]any{"row": row, "col": col},
+		"cols":        vtCols,
+		"total_lines": total,
 	}})
 }
 
