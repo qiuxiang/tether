@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hinshun/vt10x"
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
@@ -34,6 +35,9 @@ type Process struct {
 	mu     sync.Mutex
 	stdin  chan<- []byte // nil if not started or already closed
 	cancel func()
+
+	vt   vt10x.Terminal
+	vtMu sync.Mutex
 }
 
 // Start launches a process under the agent, writes output to logPath, and
