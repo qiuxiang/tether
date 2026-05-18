@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aymanbagabas/go-pty"
+	"github.com/hinshun/vt10x"
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
@@ -106,6 +107,8 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 	c.Env = mergeEnv(env)
 	c.SysProcAttr = childAttrPTY()
 
+	proc.vt = vt10x.New(vt10x.WithSize(vtCols, vtRows))
+
 	if err := c.Start(); err != nil {
 		p.Close()
 		logFile.Close()
@@ -130,12 +133,12 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 		}
 	}()
 
-	// Pump PTY → log. Done signal used to sequence Close calls.
+	// Pump PTY → log + VT. Done signal used to sequence Close calls.
 	var copyDone sync.WaitGroup
 	copyDone.Add(1)
 	go func() {
 		defer copyDone.Done()
-		io.Copy(logFile, p)
+		io.Copy(io.MultiWriter(logFile, &vtSink{p: proc}), p)
 	}()
 
 	go func() {
