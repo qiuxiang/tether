@@ -4,10 +4,6 @@ package node
 
 import "syscall"
 
-func childAttr() *syscall.SysProcAttr {
-	return nil
-}
-
 func childAttrPTY() *syscall.SysProcAttr {
 	return nil
 }

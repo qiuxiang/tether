@@ -48,7 +48,6 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			mcp.WithString("cwd"),
 			mcp.WithObject("env"),
 			mcp.WithString("stdin"),
-			mcp.WithBoolean("tty"),
 			mcp.WithNumber("timeout"),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -57,7 +56,6 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			cmd, _ := args["cmd"].(string)
 			cwd, _ := args["cwd"].(string)
 			stdin, _ := args["stdin"].(string)
-			tty, _ := args["tty"].(bool)
 			timeout := 60 * time.Second
 			if t, ok := args["timeout"].(float64); ok {
 				timeout = time.Duration(t) * time.Second
@@ -70,7 +68,7 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			msg := &protocol.Exec{
 				MsgID: id, Target: device,
 				Cmd: []string{"sh", "-c", cmd}, Cwd: cwd, Env: envMap,
-				Stdin: []byte(stdin), TTY: tty, TimeoutMs: timeout.Milliseconds(),
+				Stdin: []byte(stdin), TimeoutMs: timeout.Milliseconds(),
 			}
 			if err := c.Send(msg); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -113,7 +111,6 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			mcp.WithString("cmd", mcp.Required()),
 			mcp.WithString("cwd"),
 			mcp.WithObject("env"),
-			mcp.WithBoolean("tty"),
 			mcp.WithString("name"),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -121,7 +118,6 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			device, _ := args["device"].(string)
 			cmdStr, _ := args["cmd"].(string)
 			cwd, _ := args["cwd"].(string)
-			tty, _ := args["tty"].(bool)
 			name, _ := args["name"].(string)
 			envMap := extractStringMap(args["env"])
 			pid := NewMsgID()
@@ -131,7 +127,7 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			if err := c.Send(&protocol.Start{
 				MsgID: id, Target: device, ProcessID: pid,
 				Cmd: []string{"sh", "-c", cmdStr}, Cwd: cwd, Env: envMap,
-				TTY: tty, Name: name,
+				Name: name,
 			}); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

@@ -14,7 +14,7 @@ func TestStartPTY_FeedsVT(t *testing.T) {
 	dir := t.TempDir()
 	p := &Process{ID: "vt-pty", Cmd: []string{"sh", "-c", "printf 'foo\\rbar\\n'"}}
 	done := make(chan struct{})
-	if err := p.Start(context.Background(), dir, nil, "", true, func(code int) { close(done) }); err != nil {
+	if err := p.Start(context.Background(), dir, nil, "", func(code int) { close(done) }); err != nil {
 		t.Fatal(err)
 	}
 	<-done
@@ -29,7 +29,7 @@ func TestStartPTY_WinSize(t *testing.T) {
 	dir := t.TempDir()
 	p := &Process{ID: "vt-winsize", Cmd: []string{"sh", "-c", "stty size"}}
 	done := make(chan struct{})
-	if err := p.Start(context.Background(), dir, nil, "", true, func(code int) { close(done) }); err != nil {
+	if err := p.Start(context.Background(), dir, nil, "", func(code int) { close(done) }); err != nil {
 		t.Fatal(err)
 	}
 	<-done
@@ -54,7 +54,6 @@ func TestExecPTYTtyDetected(t *testing.T) {
 	h.Handle(context.Background(), send, &protocol.Exec{
 		MsgID: "e-tty",
 		Cmd:   []string{"sh", "-c", "if [ -t 0 ]; then echo TTY; else echo PIPE; fi"},
-		TTY:   true,
 	})
 
 	var out []byte

@@ -18,7 +18,7 @@ func TestStartProcessGroupCleanupOnShutdown(t *testing.T) {
 	done := make(chan int, 1)    // receives exit code
 
 	p := &Process{ID: "test-shutdown-1", Name: "sleep", Cmd: []string{"sleep", "30"}}
-	err := p.Start(t.Context(), h.logDir, nil, "", false, func(code int) {
+	err := p.Start(t.Context(), h.logDir, nil, "", func(code int) {
 		done <- code
 	})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestStartProcessGroupIncludesGrandchild(t *testing.T) {
 		Name: "shell-with-child",
 		Cmd:  []string{"sh", "-c", "sleep 30 & wait"},
 	}
-	err := p.Start(t.Context(), h.logDir, nil, "", false, func(_ int) {
+	err := p.Start(t.Context(), h.logDir, nil, "", func(_ int) {
 		close(done)
 	})
 	if err != nil {

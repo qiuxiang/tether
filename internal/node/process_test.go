@@ -15,7 +15,7 @@ func TestProcessKill(t *testing.T) {
 	p := &Process{ID: "p2", Cmd: []string{"sh", "-c", "sleep 10"}}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	require.NoError(t, p.Start(context.Background(), dir, nil, "", false, func(int) { wg.Done() }))
+	require.NoError(t, p.Start(context.Background(), dir, nil, "", func(int) { wg.Done() }))
 
 	time.Sleep(50 * time.Millisecond)
 	require.NoError(t, p.Kill("KILL"))
@@ -35,7 +35,7 @@ func TestProcessStdin(t *testing.T) {
 	p := &Process{ID: "p3", Cmd: []string{"cat"}}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	require.NoError(t, p.Start(context.Background(), dir, nil, "", false, func(int) { wg.Done() }))
+	require.NoError(t, p.Start(context.Background(), dir, nil, "", func(int) { wg.Done() }))
 
 	require.NoError(t, p.WriteStdin([]byte("ping\n")))
 	time.Sleep(50 * time.Millisecond)
@@ -43,11 +43,11 @@ func TestProcessStdin(t *testing.T) {
 	wg.Wait()
 }
 
-func TestStart_NonPTY_FeedsVT(t *testing.T) {
+func TestStart_PipeOutputRenders(t *testing.T) {
 	dir := t.TempDir()
 	p := &Process{ID: "vt-pipe", Cmd: []string{"sh", "-c", "printf 'hello\\nworld\\n'"}}
 	done := make(chan struct{})
-	if err := p.Start(context.Background(), dir, nil, "", false, func(code int) { close(done) }); err != nil {
+	if err := p.Start(context.Background(), dir, nil, "", func(code int) { close(done) }); err != nil {
 		t.Fatal(err)
 	}
 	<-done

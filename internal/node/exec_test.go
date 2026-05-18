@@ -24,7 +24,8 @@ func TestExecStreamsOutputAndExit(t *testing.T) {
 	h := NewProcessHandler(t.TempDir(), 50)
 	h.Handle(context.Background(), send, &protocol.Exec{MsgID: "e1", Cmd: []string{"sh", "-c", "echo hi; echo bye 1>&2; exit 3"}})
 
-	var sawStdout, sawStderr bool
+	// PTY merges stdout+stderr into a single "stdout" stream.
+	var sawStdout bool
 	var exit *protocol.ExecExit
 	deadline := time.After(3 * time.Second)
 	for exit == nil {
@@ -34,8 +35,6 @@ func TestExecStreamsOutputAndExit(t *testing.T) {
 			case *protocol.ExecOutput:
 				if v.Stream == "stdout" {
 					sawStdout = true
-				} else if v.Stream == "stderr" {
-					sawStderr = true
 				}
 			case *protocol.ExecExit:
 				exit = v
@@ -47,5 +46,4 @@ func TestExecStreamsOutputAndExit(t *testing.T) {
 	require.NotNil(t, exit)
 	assert.Equal(t, 3, exit.Code)
 	assert.True(t, sawStdout)
-	assert.True(t, sawStderr)
 }

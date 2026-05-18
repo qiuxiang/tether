@@ -38,7 +38,7 @@ func TestHandleList_IncludesLogPath(t *testing.T) {
 	h := NewProcessHandler(dir, 16)
 	p := &Process{ID: "lp", Cmd: []string{"true"}}
 	done := make(chan struct{})
-	if err := p.Start(context.Background(), dir, nil, "", false, func(int) { close(done) }); err != nil {
+	if err := p.Start(context.Background(), dir, nil, "", func(int) { close(done) }); err != nil {
 		t.Fatal(err)
 	}
 	h.registry.Add(p)
@@ -65,7 +65,7 @@ func TestHandleCaptureScreen_HappyPath(t *testing.T) {
 	h := NewProcessHandler(dir, 16)
 	p := &Process{ID: "ok", Cmd: []string{"sh", "-c", "printf 'a\\nb\\n'"}}
 	done := make(chan struct{})
-	if err := p.Start(context.Background(), dir, nil, "", false, func(int) { close(done) }); err != nil {
+	if err := p.Start(context.Background(), dir, nil, "", func(int) { close(done) }); err != nil {
 		t.Fatal(err)
 	}
 	h.registry.Add(p)

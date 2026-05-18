@@ -50,7 +50,7 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 
 func (h *ProcessHandler) handleStart(send Sender, m *protocol.Start) {
 	p := &Process{ID: m.ProcessID, Name: m.Name, Cmd: m.Cmd}
-	err := p.Start(context.Background(), h.logDir, m.Env, m.Cwd, m.TTY, func(code int) {
+	err := p.Start(context.Background(), h.logDir, m.Env, m.Cwd, func(code int) {
 		send.Send(&protocol.Event{Kind: "exit", ProcessID: m.ProcessID, Code: code})
 	})
 	if err != nil {

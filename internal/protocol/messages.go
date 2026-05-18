@@ -9,7 +9,6 @@ type Exec struct {
 	Cwd       string            `cbor:"cwd,omitempty"`
 	Env       map[string]string `cbor:"env,omitempty"`
 	Stdin     []byte            `cbor:"stdin,omitempty"`
-	TTY       bool              `cbor:"tty,omitempty"`
 	TimeoutMs int64             `cbor:"timeout_ms,omitempty"`
 }
 
@@ -27,7 +26,6 @@ type Start struct {
 	Cmd       []string          `cbor:"cmd"`
 	Cwd       string            `cbor:"cwd,omitempty"`
 	Env       map[string]string `cbor:"env,omitempty"`
-	TTY       bool              `cbor:"tty,omitempty"`
 	Name      string            `cbor:"name,omitempty"`
 }
 
