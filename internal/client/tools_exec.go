@@ -266,6 +266,50 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 		},
 	)
 
+	// capture_screen
+	m.AddTool(
+		mcp.NewTool("capture_screen",
+			mcp.WithDescription("Return the rendered terminal screen of a process (ANSI sequences resolved, colors stripped). Tmux-style line ranges. For full historical bytes beyond scrollback, use list_processes + file_transfer on log_path."),
+			mcp.WithString("device", mcp.Required()),
+			mcp.WithString("process_id", mcp.Required()),
+			mcp.WithNumber("start_line"),
+			mcp.WithNumber("end_line"),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			device, _ := args["device"].(string)
+			pid, _ := args["process_id"].(string)
+			var startLine *int
+			if v, ok := args["start_line"].(float64); ok {
+				n := int(v)
+				startLine = &n
+			}
+			var endLine *int
+			if v, ok := args["end_line"].(float64); ok {
+				n := int(v)
+				endLine = &n
+			}
+			id := NewMsgID()
+			ch := c.rpc.Register(id)
+			defer c.rpc.Unregister(id)
+			if err := c.Send(&protocol.CaptureScreen{MsgID: id, Target: device, ProcessID: pid, StartLine: startLine, EndLine: endLine}); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			select {
+			case reply := <-ch:
+				if !reply.OK {
+					return mcp.NewToolResultError(reply.Error), nil
+				}
+				b, _ := json.Marshal(reply.Data)
+				return mcp.NewToolResultText(string(b)), nil
+			case <-time.After(defaultRPCTimeout):
+				return mcp.NewToolResultError("timeout"), nil
+			case <-ctx.Done():
+				return mcp.NewToolResultError(ctx.Err().Error()), nil
+			}
+		},
+	)
+
 	// send_stdin — fire and forget
 	m.AddTool(
 		mcp.NewTool("send_stdin",
