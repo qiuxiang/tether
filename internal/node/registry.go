@@ -41,6 +41,7 @@ type processSnapshot struct {
 	LastActiveAt time.Time
 	Status       string
 	ExitCode     *int
+	LogPath      string
 }
 
 func (r *ProcessRegistry) List(filter string, limit int) []*Process {
@@ -102,6 +103,7 @@ func (r *ProcessRegistry) ListSnapshots(filter string, limit int) []processSnaps
 			LastActiveAt: p.LastActiveAt,
 			Status:       p.Status,
 			ExitCode:     p.ExitCode,
+			LogPath:      p.LogPath,
 		}
 		p.mu.Unlock()
 

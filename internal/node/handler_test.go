@@ -33,6 +33,33 @@ func TestHandleCaptureScreen_NotFound(t *testing.T) {
 	}
 }
 
+func TestHandleList_IncludesLogPath(t *testing.T) {
+	dir := t.TempDir()
+	h := NewProcessHandler(dir, 16)
+	p := &Process{ID: "lp", Cmd: []string{"true"}}
+	done := make(chan struct{})
+	if err := p.Start(context.Background(), dir, nil, "", false, func(int) { close(done) }); err != nil {
+		t.Fatal(err)
+	}
+	h.registry.Add(p)
+	<-done
+
+	s := &captureSender{msgs: make(chan protocol.Message, 4)}
+	h.Handle(context.Background(), s, &protocol.List{MsgID: "m", Limit: 10})
+	r := awaitReply(t, s.msgs)
+	items, _ := r.Data["processes"].([]map[string]any)
+	if len(items) != 1 {
+		t.Fatalf("items=%d", len(items))
+	}
+	lp, ok := items[0]["log_path"].(string)
+	if !ok || lp == "" {
+		t.Fatalf("log_path missing or empty: %+v", items[0])
+	}
+	if lp != p.LogPath {
+		t.Fatalf("log_path %q != Process.LogPath %q", lp, p.LogPath)
+	}
+}
+
 func TestHandleCaptureScreen_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	h := NewProcessHandler(dir, 16)

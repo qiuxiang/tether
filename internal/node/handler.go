@@ -175,6 +175,7 @@ func (h *ProcessHandler) handleList(send Sender, m *protocol.List) {
 			"status":         snap.Status,
 			"started_at":     snap.StartedAt.Unix(),
 			"last_active_at": snap.LastActiveAt.Unix(),
+			"log_path":       snap.LogPath,
 		}
 		if snap.ExitCode != nil {
 			entry["exit_code"] = *snap.ExitCode
