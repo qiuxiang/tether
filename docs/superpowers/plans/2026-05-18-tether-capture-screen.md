@@ -935,7 +935,17 @@ Expected: build clean, all tests pass.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add -A
+# IMPORTANT: do NOT use `git add -A`. There are untracked local files
+# (.mcp.json, cmd/probe/main.go, config-hub.yaml, tether-darwin-arm64)
+# that the user has intentionally kept out of version control.
+# Stage only the modified tracked files:
+git add internal/protocol/messages.go internal/protocol/codec.go \
+        internal/protocol/codec_test.go \
+        internal/node/handler.go internal/node/process.go \
+        internal/node/process_test.go \
+        internal/client/tools_exec.go
+# Modify cmd/probe/main.go locally for the implementer's own smoke testing
+# but DO NOT git add it — it is untracked and must stay that way.
 git commit -m "node,protocol,client: remove get_output in favor of capture_screen"
 ```
 
