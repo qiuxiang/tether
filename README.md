@@ -65,6 +65,18 @@ The `tether mcp` subcommand runs a stdio MCP server that connects to the hub.
 
 8 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `capture_screen`, `send_stdin`, `kill_process`, `file_transfer`.
 
+### capture_screen
+
+Returns the rendered terminal screen of a running process — ANSI sequences resolved, cursor moves and CR overwrites applied, colors stripped. Works for both `tty` and pipe processes; output is what would appear on a 200-column terminal after the program's bytes are played through it.
+
+```
+capture_screen(device, process_id, start_line?, end_line?)
+```
+
+`start_line` / `end_line` use tmux semantics: negative indices count from the end, omitted means "extreme" (top for start, bottom for end). Returns `{lines, cursor:{row,col}, cols, total_lines}`.
+
+The virtual terminal holds up to 10000 lines of scrollback. To retrieve raw bytes beyond that (or for binary debugging), use `list_processes` to read each entry's `log_path` and then `file_transfer` to fetch the file.
+
 ### file_transfer
 
 Single-file transfers between the local machine and a node, between two nodes, or within a node:
