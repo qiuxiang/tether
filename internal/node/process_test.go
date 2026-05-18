@@ -62,3 +62,18 @@ func TestProcessStdin(t *testing.T) {
 	data, _, _, _ := p.ReadOutput(0, 1024)
 	assert.True(t, strings.Contains(string(data), "ping"))
 }
+
+func TestStart_NonPTY_FeedsVT(t *testing.T) {
+	dir := t.TempDir()
+	p := &Process{ID: "vt-pipe", Cmd: []string{"sh", "-c", "printf 'hello\\nworld\\n'"}}
+	done := make(chan struct{})
+	if err := p.Start(context.Background(), dir, nil, "", false, func(code int) { close(done) }); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	lines, _, _, total := p.CaptureScreen(nil, nil)
+	if total != 2 || len(lines) != 2 || lines[0] != "hello" || lines[1] != "world" {
+		t.Fatalf("got lines=%q total=%d", lines, total)
+	}
+}

@@ -63,9 +63,21 @@ func (p *Process) startPipe(ctx context.Context, logDir string, env map[string]s
 	cmd := exec.CommandContext(ctx, p.Cmd[0], p.Cmd[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = mergeEnv(env)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	p.vt = vt10x.New(vt10x.WithSize(vtCols, vtRows))
+	// Enable LNM (line-feed/newline mode) so bare \n moves to column 0,
+	// matching how pipe output (without a PTY) should be rendered.
+	p.vt.Write([]byte("\x1b[20h")) //nolint:errcheck
+	w := io.MultiWriter(logFile, &vtSink{p: p})
+	cmd.Stdout = w
+	cmd.Stderr = w
 	cmd.SysProcAttr = childAttr()
+	// Kill the entire process group on context cancellation so that child
+	// processes (e.g. sleep spawned by sh) also exit, closing the stdout pipe
+	// and unblocking cmd.Wait()'s I/O copy goroutine.
+	cmd.Cancel = func() error {
+		killGroup(cmd.Process.Pid)
+		return nil
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
