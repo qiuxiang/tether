@@ -24,12 +24,18 @@ func closeSlave(p pty.Pty) {
 	}
 }
 
-// runExecStreamPTY runs an exec command attached to a PTY.
+// runExecStreamPTY runs an exec command attached to a PTY. Output bytes
+// are fed into a vt10x terminal and the rendered screen (ANSI sequences
+// resolved, CR overwrites applied, colors stripped) is returned as a
+// single ExecOutput frame after the process exits — exec is one-shot, so
+// there's no value in streaming raw escape-laden chunks the way
+// start_process does.
 func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, error) {
 	p, err := pty.New()
 	if err != nil {
 		return -1, err
 	}
+	_ = p.Resize(vtCols, ptyVisibleRows)
 
 	c := p.CommandContext(ctx, m.Cmd[0], m.Cmd[1:]...)
 	c.Dir = m.Cwd
@@ -45,24 +51,12 @@ func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, 
 		p.Write(m.Stdin)
 	}
 
-	// Drain PTY output in a goroutine. The goroutine exits when the PTY is
-	// closed (which happens after c.Wait returns below).
-	var wg sync.WaitGroup
-	wg.Add(1)
+	vt := vt10x.New(vt10x.WithSize(vtCols, vtRows))
+	var copyDone sync.WaitGroup
+	copyDone.Add(1)
 	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := p.Read(buf)
-			if n > 0 {
-				chunk := make([]byte, n)
-				copy(chunk, buf[:n])
-				send.Send(&protocol.ExecOutput{MsgID: m.MsgID, Stream: "stdout", Data: chunk})
-			}
-			if readErr != nil {
-				return
-			}
-		}
+		defer copyDone.Done()
+		io.Copy(vt, p)
 	}()
 
 	// Wait for the process to finish. Then close the slave end so the master's
@@ -72,7 +66,7 @@ func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, 
 	// picked up yet, which surfaced as a flaky "TTY" detection test under load.
 	werr := c.Wait()
 	closeSlave(p)
-	wg.Wait()
+	copyDone.Wait()
 	p.Close()
 
 	code := 0
@@ -80,6 +74,11 @@ func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, 
 		code = exitErr.ExitCode()
 	} else if werr != nil {
 		code = -1
+	}
+
+	rendered := renderAll(vt)
+	if len(rendered) > 0 {
+		send.Send(&protocol.ExecOutput{MsgID: m.MsgID, Stream: "stdout", Data: []byte(rendered)})
 	}
 	return code, nil
 }

@@ -104,6 +104,25 @@ func renderLine(vt vt10x.Terminal, cols, row int) string {
 	return strings.TrimRightFunc(b.String(), unicode.IsSpace)
 }
 
+// renderAll returns every non-empty row of vt as one "\n"-joined string
+// with trailing whitespace trimmed per line. Used by exec to return the
+// final rendered screen after the process exits.
+func renderAll(vt vt10x.Terminal) string {
+	cols, rows := vt.Size()
+	last := highestNonEmptyRow(vt, cols, rows)
+	if last < 0 {
+		return ""
+	}
+	var b strings.Builder
+	for y := 0; y <= last; y++ {
+		if y > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(renderLine(vt, cols, y))
+	}
+	return b.String()
+}
+
 func highestNonEmptyRow(vt vt10x.Terminal, cols, rows int) int {
 	for y := rows - 1; y >= 0; y-- {
 		for x := 0; x < cols; x++ {
