@@ -78,22 +78,43 @@ func TestStartPTY_BusReceivesOutputAndClosesOnExit(t *testing.T) {
 }
 
 func TestExecPTYTtyDetected(t *testing.T) {
-	send := &captureSender{msgs: make(chan protocol.Message, 16)}
+	send := &captureSender{msgs: make(chan protocol.Message, 32)}
 	h := NewProcessHandler(t.TempDir(), 50)
-	h.Handle(context.Background(), send, &protocol.Exec{
-		MsgID: "e-tty",
-		Cmd:   []string{"sh", "-c", "if [ -t 0 ]; then echo TTY; else echo PIPE; fi"},
+
+	// Start the process.
+	h.Handle(context.Background(), send, &protocol.Start{
+		MsgID:     "s-tty",
+		ProcessID: "p-tty",
+		Cmd:       []string{"sh", "-c", "if [ -t 0 ]; then echo TTY; else echo PIPE; fi"},
 	})
 
+	// Consume the Reply from Start (skip any interleaved Event frames).
+	startReply := awaitReplySkipping(t, send.msgs)
+	if !startReply.OK {
+		t.Fatalf("Start failed: %v", startReply.Error)
+	}
+
+	// Attach to the process.
+	go h.Handle(context.Background(), send, &protocol.Attach{
+		MsgID:     "a-tty",
+		ProcessID: "p-tty",
+	})
+
+	// Consume the Reply from Attach (skip any interleaved Event frames).
+	attachReply := awaitReplySkipping(t, send.msgs)
+	if !attachReply.OK {
+		t.Fatalf("Attach failed: %v", attachReply.Error)
+	}
+
 	var out []byte
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case m := <-send.msgs:
 			switch v := m.(type) {
-			case *protocol.ExecOutput:
+			case *protocol.ProcessOutput:
 				out = append(out, v.Data...)
-			case *protocol.ExecExit:
+			case *protocol.ProcessExit:
 				assert.Contains(t, strings.ToUpper(string(out)), "TTY")
 				return
 			}

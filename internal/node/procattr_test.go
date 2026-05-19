@@ -17,7 +17,7 @@ func TestStartProcessGroupCleanupOnShutdown(t *testing.T) {
 	started := make(chan int, 1) // receives pid
 	done := make(chan int, 1)    // receives exit code
 
-	p := &Process{ID: "test-shutdown-1", Name: "sleep", Cmd: []string{"sleep", "30"}}
+	p := &Process{ID: "test-shutdown-1", Description: "sleep", Cmd: []string{"sleep", "30"}}
 	err := p.Start(t.Context(), h.logDir, nil, "", func(code int) {
 		done <- code
 	})
@@ -73,9 +73,9 @@ func TestStartProcessGroupIncludesGrandchild(t *testing.T) {
 	// The inner sleep shares the same pgroup as the shell (since we use Setpgid
 	// on the shell, and the shell forks without changing pgid).
 	p := &Process{
-		ID:   "test-shutdown-grandchild",
-		Name: "shell-with-child",
-		Cmd:  []string{"sh", "-c", "sleep 30 & wait"},
+		ID:          "test-shutdown-grandchild",
+		Description: "shell-with-child",
+		Cmd:         []string{"sh", "-c", "sleep 30 & wait"},
 	}
 	err := p.Start(t.Context(), h.logDir, nil, "", func(_ int) {
 		close(done)
