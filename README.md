@@ -96,6 +96,27 @@ Returns `{ok, bytes, sha256, duration_ms}` on success, or `{ok:false, error:"...
 
 Single file only — directories are not supported (use tar/zip on the source first). Default behavior refuses to overwrite an existing destination.
 
+### Port forwarding
+
+Configure `tether mcp` to multiplex TCP forwards over its hub connection:
+
+```yaml
+hub_url: "wss://tether.example.com/client"
+token: "your-secret-token"
+forwards:
+  - "L 9000:mac:5037"           # local 127.0.0.1:9000 → mac's localhost:5037
+  - "L 0.0.0.0:9000:mac:5037"   # local 0.0.0.0:9000 → mac's localhost:5037
+  - "R mac:8080:3000"           # mac's 127.0.0.1:8080 → local 127.0.0.1:3000
+  - "R mac:0.0.0.0:8080:3000"   # mac's 0.0.0.0:8080 → local 127.0.0.1:3000
+```
+
+Syntax mirrors ssh. `L` = local listener forwarded to the named device; `R` =
+remote (node-side) listener forwarded back. `bind` defaults to `127.0.0.1`
+and the `host` segment defaults to `localhost`. Only TCP. Rules are loaded
+at `tether mcp` startup; restart `tether mcp` to change them. A node going
+offline keeps `L` listeners up (the next accept will close immediately) and
+re-establishes `R` listeners automatically when it reconnects.
+
 ## Service files
 
 systemd unit templates are in `dist/systemd/`.
