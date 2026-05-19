@@ -57,8 +57,18 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 		h.forwardHandler.Data(send, m)
 	case *protocol.ForwardClose:
 		h.forwardHandler.Close(send, m)
+	case *protocol.Event:
+		if m.Kind == "device_online" {
+			h.forwardHandler.OnDeviceOnline(m.Device, send)
+		}
+	case *protocol.Reply:
+		h.forwardHandler.OnReply(send, m)
 	}
 }
+
+// ForwardHandler returns the embedded forward handler so callers (e.g. the
+// `tether join` CLI) can seed it with rules at startup.
+func (h *ProcessHandler) ForwardHandler() *ForwardHandler { return h.forwardHandler }
 
 func (h *ProcessHandler) handleStart(send Sender, m *protocol.Start) {
 	p := &Process{ID: m.ProcessID, Name: m.Name, Cmd: m.Cmd}
