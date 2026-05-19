@@ -1,12 +1,15 @@
 package node
 
 import (
+	"context"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/qiuxiang/tether/internal/forward"
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
@@ -160,6 +163,176 @@ func splitHostPortTest(t *testing.T, addr string) (string, int) {
 		p = p*10 + int(c-'0')
 	}
 	return h, p
+}
+
+// waitFor is an alias for fwdWaitFor used by the active-forwarding tests.
+func waitFor(t *testing.T, cond func() bool, d time.Duration) bool {
+	t.Helper()
+	return fwdWaitFor(t, cond, d)
+}
+
+func TestForwardHandlerStartLocalListener(t *testing.T) {
+	send := &fwdCaptureSender{}
+	h := NewForwardHandler()
+	rule := forward.Rule{Raw: "L 0:peer:99", Dir: forward.DirLocal,
+		Bind: "127.0.0.1", ListenPort: 0, Device: "peer",
+		DestHost: "127.0.0.1", DestPort: 99}
+	h.InitRules([]forward.Rule{rule})
+	h.Start(context.Background(), send)
+
+	addr := h.LocalAddr(rule)
+	if addr == "" {
+		t.Fatal("no L listener bound")
+	}
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if !waitFor(t, func() bool {
+		send.mu.Lock()
+		defer send.mu.Unlock()
+		for _, m := range send.msgs {
+			if d, ok := m.(*protocol.ForwardDial); ok && d.Target == "peer" && d.DestPort == 99 {
+				return true
+			}
+		}
+		return false
+	}, time.Second) {
+		t.Fatalf("no forward_dial emitted, got %+v", send.msgs)
+	}
+	h.Shutdown()
+}
+
+func TestForwardHandlerStartRemoteIssuesListen(t *testing.T) {
+	send := &fwdCaptureSender{}
+	h := NewForwardHandler()
+	rule := forward.Rule{Raw: "R peer:0:127.0.0.1:99", Dir: forward.DirRemote,
+		Device: "peer", Bind: "127.0.0.1", ListenPort: 0,
+		DestHost: "127.0.0.1", DestPort: 99}
+	h.InitRules([]forward.Rule{rule})
+	h.Start(context.Background(), send)
+
+	if !waitFor(t, func() bool {
+		send.mu.Lock()
+		defer send.mu.Unlock()
+		for _, m := range send.msgs {
+			if fl, ok := m.(*protocol.ForwardListen); ok && fl.Target == "peer" {
+				return true
+			}
+		}
+		return false
+	}, time.Second) {
+		t.Fatalf("no forward_listen emitted, got %+v", send.msgs)
+	}
+	h.Shutdown()
+}
+
+func TestForwardHandlerOnDeviceOnlineReissuesRemote(t *testing.T) {
+	send := &fwdCaptureSender{}
+	h := NewForwardHandler()
+	rule := forward.Rule{Raw: "R peer:0:127.0.0.1:99", Dir: forward.DirRemote,
+		Device: "peer", Bind: "127.0.0.1", ListenPort: 0,
+		DestHost: "127.0.0.1", DestPort: 99}
+	h.InitRules([]forward.Rule{rule})
+	h.Start(context.Background(), send)
+	waitFor(t, func() bool { send.mu.Lock(); defer send.mu.Unlock(); return len(send.msgs) >= 1 }, time.Second)
+	send.mu.Lock()
+	send.msgs = nil
+	send.mu.Unlock()
+
+	h.OnDeviceOnline("peer", send)
+	if !waitFor(t, func() bool {
+		send.mu.Lock()
+		defer send.mu.Unlock()
+		for _, m := range send.msgs {
+			if _, ok := m.(*protocol.ForwardListen); ok {
+				return true
+			}
+		}
+		return false
+	}, time.Second) {
+		t.Fatalf("no re-issue on device_online: %+v", send.msgs)
+	}
+	h.Shutdown()
+}
+
+func TestForwardHandlerDialBackEcho(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		buf := make([]byte, 256)
+		for {
+			n, err := c.Read(buf)
+			if err != nil {
+				return
+			}
+			c.Write(buf[:n])
+		}
+	}()
+	host, port := splitHostPortTest(t, ln.Addr().String())
+
+	send := &fwdCaptureSender{}
+	h := NewForwardHandler()
+	rule := forward.Rule{Raw: "R peer:0:" + host + ":" + strconv.Itoa(port),
+		Dir: forward.DirRemote, Device: "peer", Bind: "127.0.0.1", ListenPort: 0,
+		DestHost: host, DestPort: port}
+	h.InitRules([]forward.Rule{rule})
+	h.Start(context.Background(), send)
+
+	var fid string
+	waitFor(t, func() bool {
+		send.mu.Lock()
+		defer send.mu.Unlock()
+		for _, m := range send.msgs {
+			if fl, ok := m.(*protocol.ForwardListen); ok {
+				fid = fl.ForwardID
+				return true
+			}
+		}
+		return false
+	}, time.Second)
+	if fid == "" {
+		t.Fatal("no forward_listen captured")
+	}
+
+	h.Dial(send, &protocol.ForwardDial{MsgID: "m1", StreamID: "s1", ForwardID: fid})
+	if !waitFor(t, func() bool {
+		send.mu.Lock()
+		defer send.mu.Unlock()
+		for _, m := range send.msgs {
+			if r, ok := m.(*protocol.Reply); ok && r.MsgID == "m1" && r.OK {
+				return true
+			}
+		}
+		return false
+	}, time.Second) {
+		t.Fatalf("no ok reply for dial-back")
+	}
+
+	h.Data(send, &protocol.ForwardData{StreamID: "s1", Data: []byte("ping")})
+	if !waitFor(t, func() bool {
+		send.mu.Lock()
+		defer send.mu.Unlock()
+		for _, m := range send.msgs {
+			if d, ok := m.(*protocol.ForwardData); ok && string(d.Data) == "ping" {
+				return true
+			}
+		}
+		return false
+	}, time.Second) {
+		t.Fatalf("no echo back")
+	}
+	h.Shutdown()
 }
 
 var _ = io.EOF

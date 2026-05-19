@@ -1,14 +1,18 @@
 package node
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"strconv"
 	"sync"
 
+	"github.com/qiuxiang/tether/internal/forward"
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
@@ -22,23 +26,176 @@ type forwardListener struct {
 }
 
 type forwardStream struct {
-	conn net.Conn
+	conn      net.Conn
+	closeOnce sync.Once
 }
 
 // ForwardHandler manages TCP port-forwarding listeners and streams.
 type ForwardHandler struct {
-	mu        sync.Mutex
-	listeners map[string]*forwardListener // forward_id → listener
-	streams   map[string]*forwardStream   // stream_id → stream
-	closed    bool
+	mu         sync.Mutex
+	listeners  map[string]net.Listener // forward_id or "L:"+rule.Raw → listener
+	streams    map[string]*forwardStream
+	rules      []forward.Rule
+	byForward  map[string]forward.Rule // forward_id → R rule we own
+	localAddrs map[string]string       // rule.Raw → bound addr
+	streamMsg  map[string]string       // stream_id → msg_id for L flows
+	closed     bool
 }
 
 // NewForwardHandler creates a new ForwardHandler.
 func NewForwardHandler() *ForwardHandler {
 	return &ForwardHandler{
-		listeners: make(map[string]*forwardListener),
-		streams:   make(map[string]*forwardStream),
+		listeners:  map[string]net.Listener{},
+		streams:    map[string]*forwardStream{},
+		byForward:  map[string]forward.Rule{},
+		localAddrs: map[string]string{},
+		streamMsg:  map[string]string{},
 	}
+}
+
+// InitRules stores the forwarding rules and assigns stable forward_ids to R rules.
+func (h *ForwardHandler) InitRules(rules []forward.Rule) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.rules = rules
+	for _, r := range rules {
+		if r.Dir == forward.DirRemote {
+			h.byForward[newStreamID()] = r
+		}
+	}
+}
+
+// Start binds L listeners and emits forward_listen for R rules. Idempotent.
+func (h *ForwardHandler) Start(ctx context.Context, send Sender) {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	rules := append([]forward.Rule(nil), h.rules...)
+	h.mu.Unlock()
+
+	for _, r := range rules {
+		switch r.Dir {
+		case forward.DirLocal:
+			h.startLocal(ctx, send, r)
+		case forward.DirRemote:
+			h.resendRemote(send, r)
+		}
+	}
+}
+
+// ResendListens re-emits forward_listen for all R rules.
+func (h *ForwardHandler) ResendListens(send Sender) {
+	h.mu.Lock()
+	rules := append([]forward.Rule(nil), h.rules...)
+	h.mu.Unlock()
+	for _, r := range rules {
+		if r.Dir == forward.DirRemote {
+			h.resendRemote(send, r)
+		}
+	}
+}
+
+// OnDeviceOnline re-emits forward_listen for R rules targeting host.
+func (h *ForwardHandler) OnDeviceOnline(host string, send Sender) {
+	h.mu.Lock()
+	rules := append([]forward.Rule(nil), h.rules...)
+	h.mu.Unlock()
+	for _, r := range rules {
+		if r.Dir == forward.DirRemote && r.Device == host {
+			h.resendRemote(send, r)
+		}
+	}
+}
+
+// OnReply closes the stream associated with a failed reply.
+func (h *ForwardHandler) OnReply(_ Sender, m *protocol.Reply) {
+	if m.OK {
+		return
+	}
+	h.mu.Lock()
+	var sid string
+	for s, mid := range h.streamMsg {
+		if mid == m.MsgID {
+			sid = s
+			break
+		}
+	}
+	h.mu.Unlock()
+	if sid == "" {
+		return
+	}
+	h.closeStream(sid)
+}
+
+// LocalAddr returns the bound address for an L rule.
+func (h *ForwardHandler) LocalAddr(r forward.Rule) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.localAddrs[r.Raw]
+}
+
+func (h *ForwardHandler) startLocal(ctx context.Context, send Sender, r forward.Rule) {
+	h.mu.Lock()
+	if _, dup := h.localAddrs[r.Raw]; dup {
+		h.mu.Unlock()
+		return
+	}
+	h.mu.Unlock()
+
+	ln, err := net.Listen("tcp", r.ListenAddr())
+	if err != nil {
+		log.Printf("forward L %s: bind failed: %v", r.Raw, err)
+		return
+	}
+	h.mu.Lock()
+	h.listeners["L:"+r.Raw] = ln
+	h.localAddrs[r.Raw] = ln.Addr().String()
+	h.mu.Unlock()
+	log.Printf("forward L %s: listening on %s", r.Raw, ln.Addr())
+
+	go h.localAcceptLoop(ctx, send, r, ln)
+}
+
+func (h *ForwardHandler) localAcceptLoop(_ context.Context, send Sender, r forward.Rule, ln net.Listener) {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		sid := newStreamID()
+		st := &forwardStream{conn: c}
+		h.mu.Lock()
+		h.streams[sid] = st
+		h.streamMsg[sid] = sid
+		h.mu.Unlock()
+		_ = send.Send(&protocol.ForwardDial{
+			MsgID: sid, Target: r.Device, StreamID: sid,
+			DestHost: r.DestHost, DestPort: r.DestPort,
+		})
+		go h.readPump(send, sid, c)
+	}
+}
+
+func (h *ForwardHandler) resendRemote(send Sender, r forward.Rule) {
+	h.mu.Lock()
+	var fid string
+	for id, rr := range h.byForward {
+		if rr.Raw == r.Raw {
+			fid = id
+			break
+		}
+	}
+	h.mu.Unlock()
+	if fid == "" {
+		return
+	}
+	_ = send.Send(&protocol.ForwardListen{
+		MsgID: fid, Target: r.Device, ForwardID: fid,
+		ListenAddr: r.ListenAddr(),
+		DestHost:   r.DestHost, DestPort: r.DestPort,
+	})
 }
 
 // Listen opens a TCP listener on ListenAddr. On success it replies with
@@ -62,7 +219,7 @@ func (h *ForwardHandler) Listen(send Sender, m *protocol.ForwardListen) {
 		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "handler shut down"})
 		return
 	}
-	h.listeners[m.ForwardID] = fl
+	h.listeners[m.ForwardID] = ln
 	h.mu.Unlock()
 
 	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
@@ -102,9 +259,19 @@ func (h *ForwardHandler) acceptLoop(send Sender, fl *forwardListener) {
 	}
 }
 
-// Dial opens a TCP connection to DestHost:DestPort and attaches it as a stream.
+// Dial opens a TCP connection. If ForwardID matches an R rule we own, dial our
+// configured destination; otherwise use m.DestHost:m.DestPort.
 func (h *ForwardHandler) Dial(send Sender, m *protocol.ForwardDial) {
-	addr := fmt.Sprintf("%s:%d", m.DestHost, m.DestPort)
+	h.mu.Lock()
+	r, isDialBack := h.byForward[m.ForwardID]
+	h.mu.Unlock()
+
+	var addr string
+	if isDialBack {
+		addr = net.JoinHostPort(r.DestHost, strconv.Itoa(r.DestPort))
+	} else {
+		addr = fmt.Sprintf("%s:%d", m.DestHost, m.DestPort)
+	}
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "dial: " + err.Error()})
@@ -128,7 +295,7 @@ func (h *ForwardHandler) Dial(send Sender, m *protocol.ForwardDial) {
 // Unlisten stops a listener by forward_id.
 func (h *ForwardHandler) Unlisten(send Sender, m *protocol.ForwardUnlisten) {
 	h.mu.Lock()
-	fl, ok := h.listeners[m.ForwardID]
+	ln, ok := h.listeners[m.ForwardID]
 	if ok {
 		delete(h.listeners, m.ForwardID)
 	}
@@ -138,7 +305,7 @@ func (h *ForwardHandler) Unlisten(send Sender, m *protocol.ForwardUnlisten) {
 		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "forward_id not found"})
 		return
 	}
-	fl.ln.Close()
+	ln.Close()
 	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true})
 }
 
@@ -188,22 +355,41 @@ func (h *ForwardHandler) Close(_ Sender, m *protocol.ForwardClose) {
 	}
 }
 
+// closeStream closes a stream by ID.
+func (h *ForwardHandler) closeStream(sid string) {
+	h.mu.Lock()
+	fs, ok := h.streams[sid]
+	if ok {
+		delete(h.streams, sid)
+		delete(h.streamMsg, sid)
+	}
+	h.mu.Unlock()
+	if ok {
+		fs.closeOnce.Do(func() { fs.conn.Close() })
+	}
+}
+
 // Shutdown closes all listeners and streams. Idempotent.
 func (h *ForwardHandler) Shutdown() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if h.closed {
+		h.mu.Unlock()
 		return
 	}
 	h.closed = true
-	for _, fl := range h.listeners {
-		fl.ln.Close()
+	lns := h.listeners
+	streams := h.streams
+	h.listeners = map[string]net.Listener{}
+	h.streams = map[string]*forwardStream{}
+	h.localAddrs = map[string]string{}
+	h.mu.Unlock()
+
+	for _, ln := range lns {
+		ln.Close()
 	}
-	for _, fs := range h.streams {
-		fs.conn.Close()
+	for _, st := range streams {
+		st.closeOnce.Do(func() { st.conn.Close() })
 	}
-	h.listeners = make(map[string]*forwardListener)
-	h.streams = make(map[string]*forwardStream)
 }
 
 // readPump drains bytes from conn and emits ForwardData frames until EOF or error.
