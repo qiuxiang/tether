@@ -49,6 +49,12 @@ func (s *Server) broadcastDeviceEvent(kind, hostname string) {
 			_ = c.Conn.SendRaw(raw)
 		}
 	}
+	for _, d := range s.registry.List() {
+		if d.Hostname == hostname || d.Conn == nil {
+			continue
+		}
+		_ = d.Conn.SendRaw(raw)
+	}
 }
 
 func (s *Server) Handler() http.Handler {

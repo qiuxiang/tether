@@ -107,6 +107,26 @@ func TestNodeForwardDataRoutedToClient(t *testing.T) {
 	}
 }
 
+func TestDeviceOnlineBroadcastToNodes(t *testing.T) {
+	s := NewServer(Options{Token: "x"})
+	other := &fakePeer{}
+	s.Registry().Register(&Device{Hostname: "other-node", Conn: other})
+
+	s.broadcastDeviceEvent("device_online", "mac")
+
+	if len(other.sent) != 1 {
+		t.Fatalf("other node should have received 1 event, got %d", len(other.sent))
+	}
+	msg, err := protocol.Decode(other.sent[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := msg.(*protocol.Event)
+	if !ok || ev.Kind != "device_online" || ev.Device != "mac" {
+		t.Fatalf("wrong event: %+v", msg)
+	}
+}
+
 func TestNodeDisconnectEvictsStreams(t *testing.T) {
 	s := NewServer(Options{Token: "x"})
 	client := &fakePeer{}
