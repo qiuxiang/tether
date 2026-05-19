@@ -20,6 +20,10 @@ type Config struct {
 	AgentVersion string
 	ReconnectMin time.Duration
 	ReconnectMax time.Duration
+	// OnConnected, if non-nil, is invoked after each successful handshake with
+	// a sender bound to the new connection. Used to re-issue stateful requests
+	// (forward_listen, etc.) on reconnect.
+	OnConnected func(send Sender)
 }
 
 type Handler interface {
@@ -130,6 +134,10 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 
 	// Keep the connection alive across idle reverse-proxy timeouts.
 	go pingLoop(ctx, conn)
+
+	if c.cfg.OnConnected != nil {
+		go c.cfg.OnConnected(c)
+	}
 
 	for {
 		_, data, err := conn.Read(ctx)
