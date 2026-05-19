@@ -35,7 +35,7 @@ func (r *ProcessRegistry) Get(id string) (*Process, bool) {
 // callers never need to touch p.mu themselves, eliminating the field races.
 type processSnapshot struct {
 	ID           string
-	Name         string
+	Description  string
 	Cmd          []string
 	StartedAt    time.Time
 	LastActiveAt time.Time
@@ -97,7 +97,7 @@ func (r *ProcessRegistry) ListSnapshots(filter string, limit int) []processSnaps
 		p.mu.Lock()
 		snap := processSnapshot{
 			ID:           p.ID,
-			Name:         p.Name,
+			Description:  p.Description,
 			Cmd:          p.Cmd,
 			StartedAt:    p.StartedAt,
 			LastActiveAt: p.LastActiveAt,

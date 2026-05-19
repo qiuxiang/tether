@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/hinshun/vt10x"
-	"github.com/qiuxiang/tether/internal/protocol"
 )
 
 // removeFile is a var so tests can stub it. Default: os.Remove.
@@ -19,7 +18,7 @@ var removeFile = os.Remove
 // Process represents a managed OS process on the node agent.
 type Process struct {
 	ID           string
-	Name         string
+	Description  string
 	Cmd          []string
 	Status       string // "running" | "exited"
 	StartedAt    time.Time
@@ -35,6 +34,11 @@ type Process struct {
 
 	vt   vt10x.Terminal
 	vtMu sync.Mutex
+
+	// bus is the live raw-byte stream used by Attach subscribers. Always
+	// non-nil for a running process; Close()d after exit so subscribers
+	// see EOF naturally.
+	bus *byteBus
 }
 
 // Start launches a process under the agent inside a PTY, writes output to
@@ -92,6 +96,3 @@ func (p *Process) Kill(signal string) error {
 	return nil
 }
 
-func runExecStream(ctx context.Context, m *protocol.Exec, send Sender) (int, error) {
-	return runExecStreamPTY(ctx, m, send)
-}
