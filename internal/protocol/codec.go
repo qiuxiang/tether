@@ -78,6 +78,16 @@ func setType(m Message) {
 		v.Type = m.msgType()
 	case *FileLocalCopy:
 		v.Type = m.msgType()
+	case *ForwardListen:
+		v.Type = m.msgType()
+	case *ForwardUnlisten:
+		v.Type = m.msgType()
+	case *ForwardDial:
+		v.Type = m.msgType()
+	case *ForwardData:
+		v.Type = m.msgType()
+	case *ForwardClose:
+		v.Type = m.msgType()
 	case *rawMsg:
 		v.Type = m.msgType()
 	}
@@ -129,6 +139,16 @@ func Decode(data []byte) (Message, error) {
 		m = &FileRelay{}
 	case "file_local_copy":
 		m = &FileLocalCopy{}
+	case "forward_listen":
+		m = &ForwardListen{}
+	case "forward_unlisten":
+		m = &ForwardUnlisten{}
+	case "forward_dial":
+		m = &ForwardDial{}
+	case "forward_data":
+		m = &ForwardData{}
+	case "forward_close":
+		m = &ForwardClose{}
 	default:
 		return nil, fmt.Errorf("unknown message type: %q", hdr.Type)
 	}
