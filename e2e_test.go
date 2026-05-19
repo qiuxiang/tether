@@ -5,14 +5,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/qiuxiang/tether/internal/client"
+	"github.com/qiuxiang/tether/internal/forward"
 	"github.com/qiuxiang/tether/internal/hub"
 	"github.com/qiuxiang/tether/internal/node"
 	"github.com/qiuxiang/tether/internal/protocol"
@@ -288,4 +292,178 @@ func asMapSlice(v any) []map[string]any {
 		return out
 	}
 	return nil
+}
+
+// TestE2EForwardLocalSelfLoop exercises the L (local) forward rule end-to-end.
+// Node A holds the rule and listens locally; the hub routes each accepted
+// connection to Node B which dials the echo server.
+func TestE2EForwardLocalSelfLoop(t *testing.T) {
+	s := hub.NewServer(hub.Options{Token: "secret"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	go echoLoop(ln)
+	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+
+	rule := forward.Rule{
+		Raw: "L 0:e2e-host-b:127.0.0.1:" + portStr,
+		Dir: forward.DirLocal, Bind: "127.0.0.1", ListenPort: 0,
+		Device: "e2e-host-b", DestHost: "127.0.0.1", DestPort: port,
+	}
+
+	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
+
+	// Node A: holds the L rule; its local listener is what the test connects to.
+	phA := node.NewProcessHandler(t.TempDir(), 50)
+	phA.ForwardHandler().InitRules([]forward.Rule{rule})
+	ncA := node.New(node.Config{
+		HubURL: nodeURL, Token: "secret", Hostname: "e2e-host-a",
+		OnConnected: func(send node.Sender) {
+			phA.ForwardHandler().Start(context.Background(), send)
+		},
+	})
+	ncA.SetHandler(phA)
+	go ncA.Run(ctx)
+
+	// Node B: target of the L rule; dials the echo server when ForwardDial arrives.
+	phB := node.NewProcessHandler(t.TempDir(), 50)
+	ncB := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host-b"})
+	ncB.SetHandler(phB)
+	go ncB.Run(ctx)
+
+	require.Eventually(t, func() bool { _, ok := s.Registry().Get("e2e-host-a"); return ok },
+		2*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool { _, ok := s.Registry().Get("e2e-host-b"); return ok },
+		2*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool { return phA.ForwardHandler().LocalAddr(rule) != "" },
+		2*time.Second, 20*time.Millisecond)
+
+	addr := phA.ForwardHandler().LocalAddr(rule)
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+	_, err = conn.Write([]byte("hello"))
+	require.NoError(t, err)
+	buf := make([]byte, 5)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, err = io.ReadFull(conn, buf)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(buf))
+
+	phA.Shutdown()
+	phB.Shutdown()
+}
+
+// TestE2EForwardRemoteSelfLoop exercises the R (remote) forward rule end-to-end.
+// Node A holds the rule and dials the echo server; Node B opens the listener
+// and the test connects to it.
+func TestE2EForwardRemoteSelfLoop(t *testing.T) {
+	s := hub.NewServer(hub.Options{Token: "secret"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	go echoLoop(ln)
+	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+
+	rule := forward.Rule{
+		Raw: "R e2e-host-b:0:127.0.0.1:" + portStr,
+		Dir: forward.DirRemote, Device: "e2e-host-b",
+		Bind: "127.0.0.1", ListenPort: 0,
+		DestHost: "127.0.0.1", DestPort: port,
+	}
+
+	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
+
+	// Node A: holds the R rule; dials the echo server on each accepted connection.
+	phA := node.NewProcessHandler(t.TempDir(), 50)
+	phA.ForwardHandler().InitRules([]forward.Rule{rule})
+
+	addrCh := make(chan string, 1)
+	tapA := &replyTapHandler{inner: phA, addr: addrCh}
+
+	ncA := node.New(node.Config{
+		HubURL: nodeURL, Token: "secret", Hostname: "e2e-host-a",
+		OnConnected: func(send node.Sender) {
+			phA.ForwardHandler().Start(context.Background(), send)
+		},
+	})
+	ncA.SetHandler(tapA)
+	go ncA.Run(ctx)
+
+	// Node B: target of the R rule; opens the TCP listener when ForwardListen arrives.
+	phB := node.NewProcessHandler(t.TempDir(), 50)
+	ncB := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host-b"})
+	ncB.SetHandler(phB)
+	go ncB.Run(ctx)
+
+	require.Eventually(t, func() bool { _, ok := s.Registry().Get("e2e-host-a"); return ok },
+		2*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool { _, ok := s.Registry().Get("e2e-host-b"); return ok },
+		2*time.Second, 20*time.Millisecond)
+
+	var addr string
+	select {
+	case addr = <-addrCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no listen_addr captured")
+	}
+
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+	_, err = conn.Write([]byte("world"))
+	require.NoError(t, err)
+	buf := make([]byte, 5)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, err = io.ReadFull(conn, buf)
+	require.NoError(t, err)
+	assert.Equal(t, "world", string(buf))
+
+	phA.Shutdown()
+	phB.Shutdown()
+}
+
+// replyTapHandler wraps a node.Handler and snoops inbound Reply frames for a
+// "listen_addr" field. After surfacing it once, all frames continue to flow
+// to the wrapped handler.
+type replyTapHandler struct {
+	inner node.Handler
+	addr  chan<- string
+}
+
+func (t *replyTapHandler) Handle(ctx context.Context, send node.Sender, msg protocol.Message) {
+	if r, ok := msg.(*protocol.Reply); ok && r.OK && r.Data != nil {
+		if v, ok := r.Data["listen_addr"].(string); ok {
+			select {
+			case t.addr <- v:
+			default:
+			}
+		}
+	}
+	t.inner.Handle(ctx, send, msg)
+}
+
+func echoLoop(ln net.Listener) {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			io.Copy(c, c)
+		}(c)
+	}
 }

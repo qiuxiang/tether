@@ -99,9 +99,10 @@ type ExecExit struct {
 
 type Event struct {
 	Type      string `cbor:"type"`
-	Kind      string `cbor:"kind"` // "exit"
-	ProcessID string `cbor:"process_id"`
+	Kind      string `cbor:"kind"` // "exit" | "device_online" | "device_offline"
+	ProcessID string `cbor:"process_id,omitempty"`
 	Code      int    `cbor:"code,omitempty"`
+	Device    string `cbor:"device,omitempty"`
 }
 
 // ListDevices is a hub-local request (no Target).

@@ -9,20 +9,22 @@ import (
 )
 
 type ProcessHandler struct {
-	registry    *ProcessRegistry
-	logDir      string
-	mu          sync.Mutex
-	execMu      sync.Mutex
-	execCancel  map[string]context.CancelFunc
-	fileHandler *FileHandler
+	registry       *ProcessRegistry
+	logDir         string
+	mu             sync.Mutex
+	execMu         sync.Mutex
+	execCancel     map[string]context.CancelFunc
+	fileHandler    *FileHandler
+	forwardHandler *ForwardHandler
 }
 
 func NewProcessHandler(logDir string, cap int) *ProcessHandler {
 	return &ProcessHandler{
-		registry:    NewProcessRegistry(cap),
-		logDir:      logDir,
-		execCancel:  make(map[string]context.CancelFunc),
-		fileHandler: NewFileHandler(),
+		registry:       NewProcessRegistry(cap),
+		logDir:         logDir,
+		execCancel:     make(map[string]context.CancelFunc),
+		fileHandler:    NewFileHandler(),
+		forwardHandler: NewForwardHandler(),
 	}
 }
 
@@ -45,8 +47,28 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 	case *protocol.FilePutOpen, *protocol.FileChunk, *protocol.FileAbort,
 		*protocol.FileGetOpen, *protocol.FileLocalCopy:
 		h.fileHandler.Handle(send, msg)
+	case *protocol.ForwardListen:
+		h.forwardHandler.Listen(send, m)
+	case *protocol.ForwardUnlisten:
+		h.forwardHandler.Unlisten(send, m)
+	case *protocol.ForwardDial:
+		h.forwardHandler.Dial(send, m)
+	case *protocol.ForwardData:
+		h.forwardHandler.Data(send, m)
+	case *protocol.ForwardClose:
+		h.forwardHandler.Close(send, m)
+	case *protocol.Event:
+		if m.Kind == "device_online" {
+			h.forwardHandler.OnDeviceOnline(m.Device, send)
+		}
+	case *protocol.Reply:
+		h.forwardHandler.OnReply(send, m)
 	}
 }
+
+// ForwardHandler returns the embedded forward handler so callers (e.g. the
+// `tether join` CLI) can seed it with rules at startup.
+func (h *ProcessHandler) ForwardHandler() *ForwardHandler { return h.forwardHandler }
 
 func (h *ProcessHandler) handleStart(send Sender, m *protocol.Start) {
 	p := &Process{ID: m.ProcessID, Name: m.Name, Cmd: m.Cmd}
@@ -128,7 +150,8 @@ func (h *ProcessHandler) handleExecCancel(m *protocol.ExecCancel) {
 	h.execMu.Unlock()
 }
 
-// Shutdown sends SIGTERM to all running process groups. Idempotent.
+// Shutdown sends SIGTERM to all running process groups and closes all
+// forward listeners and streams. Idempotent.
 func (h *ProcessHandler) Shutdown() {
 	for _, p := range h.registry.List("running", 0) {
 		p.mu.Lock()
@@ -138,6 +161,7 @@ func (h *ProcessHandler) Shutdown() {
 			killGroup(pid)
 		}
 	}
+	h.forwardHandler.Shutdown()
 }
 
 func (h *ProcessHandler) handleList(send Sender, m *protocol.List) {

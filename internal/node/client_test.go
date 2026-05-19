@@ -61,6 +61,33 @@ func TestNodeReconnects(t *testing.T) {
 	}, 3*time.Second, 50*time.Millisecond)
 }
 
+func TestClientOnConnectedFired(t *testing.T) {
+	s := hub.NewServer(hub.Options{Token: "x"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	wsURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
+
+	called := make(chan struct{}, 1)
+	cli := New(Config{
+		HubURL:       wsURL,
+		Token:        "x",
+		Hostname:     "h1",
+		OnConnected:  func(_ Sender) { select { case called <- struct{}{}: default: } },
+		ReconnectMin: 10 * time.Millisecond,
+		ReconnectMax: 50 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go cli.Run(ctx)
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnConnected not called")
+	}
+}
+
 type echoHandler struct{}
 
 func (echoHandler) Handle(ctx context.Context, send Sender, msg protocol.Message) {

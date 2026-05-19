@@ -96,3 +96,13 @@ func (r *ClientRegistry) Unregister(id string) {
 	defer r.mu.Unlock()
 	delete(r.clients, id)
 }
+
+func (r *ClientRegistry) List() []*Client {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*Client, 0, len(r.clients))
+	for _, c := range r.clients {
+		out = append(out, c)
+	}
+	return out
+}
