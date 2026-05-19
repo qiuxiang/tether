@@ -32,12 +32,17 @@ func Join(args []string, stderr io.Writer) int {
 	if host == "" {
 		host, _ = os.Hostname()
 	}
+	ph := node.NewProcessHandler(cfg.LogDir, 50)
+	ph.ForwardHandler().InitRules(cfg.Forwards)
+
 	cli := node.New(node.Config{
 		HubURL:   cfg.HubURL,
 		Token:    cfg.Token,
 		Hostname: host,
+		OnConnected: func(send node.Sender) {
+			ph.ForwardHandler().Start(context.Background(), send)
+		},
 	})
-	ph := node.NewProcessHandler(cfg.LogDir, 50)
 	cli.SetHandler(ph)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
