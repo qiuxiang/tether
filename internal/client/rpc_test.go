@@ -18,12 +18,12 @@ func TestRPCReply(t *testing.T) {
 func TestRPCStream(t *testing.T) {
 	r := NewRPC()
 	ch := r.RegisterStream("s1")
-	r.Deliver(&protocol.ExecOutput{MsgID: "s1", Stream: "stdout", Data: []byte("x")})
-	r.Deliver(&protocol.ExecExit{MsgID: "s1", Code: 0})
+	r.Deliver(&protocol.ProcessOutput{MsgID: "s1", Data: []byte("x")})
+	r.Deliver(&protocol.ProcessExit{MsgID: "s1", Code: 0})
 	a := <-ch
-	require.IsType(t, &protocol.ExecOutput{}, a)
+	require.IsType(t, &protocol.ProcessOutput{}, a)
 	b := <-ch
-	require.IsType(t, &protocol.ExecExit{}, b)
+	require.IsType(t, &protocol.ProcessExit{}, b)
 	_, ok := <-ch
-	require.False(t, ok, "channel should be closed after ExecExit")
+	require.False(t, ok, "channel should be closed after ProcessExit")
 }

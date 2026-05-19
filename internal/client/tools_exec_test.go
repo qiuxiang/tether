@@ -61,32 +61,57 @@ func TestExecEndToEnd(t *testing.T) {
 	c, _, cleanup := setupClusterWithClient(t)
 	defer cleanup()
 
-	id := NewMsgID()
-	ch := c.rpc.RegisterStream(id)
-	defer c.rpc.Unregister(id)
-	require.NoError(t, c.Send(&protocol.Exec{
-		MsgID: id, Target: "n1",
+	pid := NewMsgID()
+
+	// Step 1: Start the process.
+	startID := NewMsgID()
+	startCh := c.rpc.Register(startID)
+	require.NoError(t, c.Send(&protocol.Start{
+		MsgID: startID, Target: "n1", ProcessID: pid,
 		Cmd: []string{"sh", "-c", "echo hello"},
-		TimeoutMs: 5000,
 	}))
-	var stdout []byte
+	select {
+	case r := <-startCh:
+		require.True(t, r.OK, "Start failed: %s", r.Error)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Start timed out")
+	}
+	c.rpc.Unregister(startID)
+
+	// Step 2: Attach to receive output.
+	attachID := NewMsgID()
+	attachReplyCh := c.rpc.Register(attachID)
+	streamCh := c.rpc.RegisterStream(attachID)
+	defer c.rpc.Unregister(attachID)
+	require.NoError(t, c.Send(&protocol.Attach{
+		MsgID: attachID, Target: "n1", ProcessID: pid,
+	}))
+	select {
+	case r := <-attachReplyCh:
+		require.True(t, r.OK, "Attach failed: %s", r.Error)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Attach reply timed out")
+	}
+
+	// Step 3: Collect output until ProcessExit.
+	var output []byte
 	deadline := time.After(3 * time.Second)
 	for {
 		select {
-		case m, ok := <-ch:
+		case m, ok := <-streamCh:
 			if !ok {
-				t.Fatalf("channel closed before ExecExit; stdout=%q", stdout)
+				t.Fatalf("channel closed before ProcessExit; output=%q", output)
 			}
 			switch v := m.(type) {
-			case *protocol.ExecOutput:
-				stdout = append(stdout, v.Data...)
-			case *protocol.ExecExit:
+			case *protocol.ProcessOutput:
+				output = append(output, v.Data...)
+			case *protocol.ProcessExit:
 				require.Equal(t, 0, v.Code)
-				require.Contains(t, string(stdout), "hello")
+				require.Contains(t, string(output), "hello")
 				return
 			}
 		case <-deadline:
-			t.Fatal("exec timed out")
+			t.Fatalf("exec timed out; output so far=%q", output)
 		}
 	}
 }
