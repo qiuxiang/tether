@@ -104,7 +104,7 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 					return mcp.NewToolResultError(reply.Error), nil
 				}
 			case <-ctx.Done():
-				_ = c.Send(&protocol.Detach{Target: device, ProcessID: pid})
+				_ = c.Send(&protocol.Detach{MsgID: attachID, Target: device, ProcessID: pid})
 				return resultExec(nil, 0, pid, true, ""), nil
 			}
 
@@ -123,7 +123,7 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 						return resultExec(output, v.Code, pid, false, ""), nil
 					}
 				case <-ctx.Done():
-					_ = c.Send(&protocol.Detach{Target: device, ProcessID: pid})
+					_ = c.Send(&protocol.Detach{MsgID: attachID, Target: device, ProcessID: pid})
 					return resultExec(output, 0, pid, true, ""), nil
 				}
 			}

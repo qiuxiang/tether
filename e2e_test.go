@@ -202,7 +202,7 @@ drainLoop:
 	c.RPC().Unregister(attachID)
 
 	// 4) Send Detach (fire-and-forget).
-	require.NoError(t, c.Send(&protocol.Detach{Target: "e2e-host", ProcessID: pid}))
+	require.NoError(t, c.Send(&protocol.Detach{MsgID: attachID, Target: "e2e-host", ProcessID: pid}))
 
 	// 5) Verify the process is still running via list_processes.
 	listID := client.NewMsgID()

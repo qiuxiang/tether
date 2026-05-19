@@ -74,7 +74,11 @@ func (r *RPC) Deliver(msg protocol.Message) {
 		ch, ok := r.streams[m.MsgID]
 		r.mu.Unlock()
 		if ok {
-			ch <- m
+			select {
+			case ch <- m:
+			default:
+				// Consumer is gone or stalled; drop. Stream is closing.
+			}
 		}
 	case *protocol.ProcessExit:
 		r.mu.Lock()

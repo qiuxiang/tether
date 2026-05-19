@@ -89,3 +89,69 @@ func TestStartAttachStreamsOutputAndExit(t *testing.T) {
 	assert.Equal(t, 3, exit.Code)
 	assert.True(t, sawOutput, "expected at least one ProcessOutput frame")
 }
+
+// TestDetachUnblocksAttach verifies that handleDetach causes the corresponding
+// handleAttach goroutine to exit without killing the process.
+func TestDetachUnblocksAttach(t *testing.T) {
+	send := &captureSender{msgs: make(chan protocol.Message, 64)}
+	h := NewProcessHandler(t.TempDir(), 50)
+
+	// 1) Start a long-running process.
+	h.Handle(context.Background(), send, &protocol.Start{
+		MsgID:     "s-detach",
+		ProcessID: "p-detach",
+		Cmd:       []string{"sh", "-c", "sleep 10"},
+	})
+	startReply := awaitReplySkipping(t, send.msgs)
+	require.True(t, startReply.OK, "Start failed: %v", startReply.Error)
+
+	// 2) Attach in a goroutine; wait for the initial Reply OK.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Handle(context.Background(), send, &protocol.Attach{
+			MsgID:     "a-detach",
+			ProcessID: "p-detach",
+		})
+	}()
+
+	attachReply := awaitReplySkipping(t, send.msgs)
+	require.True(t, attachReply.OK, "Attach failed: %v", attachReply.Error)
+
+	// 3) Detach using the same MsgID as Attach.
+	h.Handle(context.Background(), send, &protocol.Detach{
+		MsgID:     "a-detach",
+		ProcessID: "p-detach",
+	})
+
+	// 4) handleAttach goroutine should exit within 1s (it sees the bus Done).
+	// It also sends a ProcessExit frame before returning.
+	var sawExit bool
+	deadline := time.After(1 * time.Second)
+	for !sawExit {
+		select {
+		case m := <-send.msgs:
+			if _, ok := m.(*protocol.ProcessExit); ok {
+				sawExit = true
+			}
+		case <-deadline:
+			t.Fatal("timeout: handleAttach goroutine did not exit after Detach")
+		}
+	}
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout: handleAttach goroutine still running after ProcessExit")
+	}
+
+	// 5) The process must still be running (Detach must not kill it).
+	p, ok := h.registry.Get("p-detach")
+	require.True(t, ok, "process should still be in registry after Detach")
+	p.mu.Lock()
+	status := p.Status
+	p.mu.Unlock()
+	assert.Equal(t, "running", status, "process should still be running after Detach")
+
+	// 6) Cleanup: kill the process.
+	_ = p.Kill("TERM")
+}
