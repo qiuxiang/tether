@@ -65,7 +65,7 @@ The `tether mcp` subcommand runs a stdio MCP server that holds an outbound WSS c
 }
 ```
 
-8 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `capture_screen`, `send_stdin`, `kill_process`, `file_transfer`.
+11 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `capture_screen`, `send_stdin`, `kill_process`, `file_transfer`, `read_file`, `write_file`, `edit_file`.
 
 ### capture_screen
 
@@ -95,6 +95,23 @@ Path syntax:
 Returns `{ok, bytes, sha256, duration_ms}` on success, or `{ok:false, error:"..."}` on failure.
 
 Single file only — directories are not supported (use tar/zip on the source first). Default behavior refuses to overwrite an existing destination.
+
+### read_file / write_file / edit_file
+
+In-place file editing on a node, mirroring Claude Code's built-in Read / Write / Edit tools but with `node:` paths.
+
+~~~
+read_file(path, offset?=0, limit?=2000)
+  → {lines, total_lines, truncated, sha256, binary}
+
+write_file(path, content, overwrite?=false, create_dirs?=false)
+  → {bytes, sha256}
+
+edit_file(path, old_string, new_string, replace_all?=false)
+  → {replacements, sha256}
+~~~
+
+All paths must be `node:/abs/path` or `node:~/path` — local files are handled by Claude Code's built-in tools. Writes are atomic (temp file + fsync + rename in the same directory). `edit_file` requires `old_string` to occur exactly once unless `replace_all=true`. The 10 MB per-file limit applies to all three — use `file_transfer` for anything larger.
 
 ### Port forwarding
 
