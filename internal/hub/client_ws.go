@@ -56,25 +56,6 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 			s.router.Unregister(msgID)
 		}
 		sess.mu.Unlock()
-		// Forward cleanup: drop listeners + evict streams; notify nodes.
-		for _, fid := range s.forwards.RemoveListenersForClient(sess) {
-			unl := &protocol.ForwardUnlisten{ForwardID: fid}
-			raw, _ := protocol.Encode(unl)
-			for _, d := range s.registry.List() {
-				if d.Conn != nil {
-					_ = d.Conn.SendRaw(raw)
-				}
-			}
-		}
-		for _, sid := range s.forwards.EvictStreamsForClient(sess) {
-			cl := &protocol.ForwardClose{StreamID: sid, Half: "both"}
-			raw, _ := protocol.Encode(cl)
-			for _, d := range s.registry.List() {
-				if d.Conn != nil {
-					_ = d.Conn.SendRaw(raw)
-				}
-			}
-		}
 		c.Close(websocket.StatusNormalClosure, "")
 	}()
 	sess.run(ctx)
@@ -153,9 +134,6 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 		if err := cs.server.relay.Start(cs, m); err != nil {
 			cs.sendErrorReply(m.MsgID, err)
 		}
-	case *protocol.ForwardListen, *protocol.ForwardUnlisten, *protocol.ForwardDial,
-		*protocol.ForwardData, *protocol.ForwardClose:
-		cs.dispatchForward(raw, msg, cs)
 	default:
 		// Unknown / not-routable from client: drop.
 	}
@@ -250,59 +228,6 @@ func (cs *clientSession) untrackPending(msgID string) {
 	cs.mu.Lock()
 	delete(cs.pending, msgID)
 	cs.mu.Unlock()
-}
-
-func (cs *clientSession) dispatchForward(raw []byte, msg protocol.Message, client PeerConn) {
-	switch m := msg.(type) {
-	case *protocol.ForwardListen:
-		d, ok := cs.server.registry.Get(m.Target)
-		if !ok || d.Conn == nil {
-			cs.sendErrorReply(m.MsgID, fmt.Errorf("device_offline: %s", m.Target))
-			return
-		}
-		cs.server.forwards.AddListener(m.ForwardID, client)
-		cs.server.router.Register(m.MsgID, client, false)
-		if err := d.Conn.SendRaw(raw); err != nil {
-			cs.server.forwards.RemoveListener(m.ForwardID)
-			cs.server.router.Unregister(m.MsgID)
-			cs.sendErrorReply(m.MsgID, err)
-		}
-	case *protocol.ForwardUnlisten:
-		cs.server.forwards.RemoveListener(m.ForwardID)
-		d, ok := cs.server.registry.Get(m.Target)
-		if ok && d.Conn != nil {
-			cs.server.router.Register(m.MsgID, client, false)
-			_ = d.Conn.SendRaw(raw)
-		}
-	case *protocol.ForwardDial:
-		d, ok := cs.server.registry.Get(m.Target)
-		if !ok || d.Conn == nil {
-			cs.sendErrorReply(m.MsgID, fmt.Errorf("device_offline: %s", m.Target))
-			return
-		}
-		cs.server.forwards.OpenStream(m.StreamID, client, d.Conn)
-		cs.server.router.Register(m.MsgID, client, false)
-		if err := d.Conn.SendRaw(raw); err != nil {
-			cs.server.forwards.CloseStream(m.StreamID)
-			cs.server.router.Unregister(m.MsgID)
-			cs.sendErrorReply(m.MsgID, err)
-		}
-	case *protocol.ForwardData:
-		_, node, ok := cs.server.forwards.LookupStream(m.StreamID)
-		if !ok {
-			return
-		}
-		_ = node.SendRaw(raw)
-	case *protocol.ForwardClose:
-		_, node, ok := cs.server.forwards.LookupStream(m.StreamID)
-		if !ok {
-			return
-		}
-		_ = node.SendRaw(raw)
-		if m.Half == "" || m.Half == "both" {
-			cs.server.forwards.CloseStream(m.StreamID)
-		}
-	}
 }
 
 func (cs *clientSession) routeFilePut(msgID, target string, raw []byte) {
