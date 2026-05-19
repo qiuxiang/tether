@@ -28,9 +28,20 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("device registered: hostname=%s os=%s arch=%s", sess.device.Hostname, sess.device.OS, sess.device.Arch)
+	s.broadcastDeviceEvent("device_online", sess.device.Hostname)
 	defer func() {
 		log.Printf("device disconnected: hostname=%s", sess.device.Hostname)
 		s.registry.Unregister(sess.device.Hostname)
+		s.broadcastDeviceEvent("device_offline", sess.device.Hostname)
+		for _, sid := range s.forwards.EvictStreamsForNode(sess) {
+			cl := &protocol.ForwardClose{StreamID: sid, Half: "both"}
+			raw, _ := protocol.Encode(cl)
+			for _, client := range s.clients.List() {
+				if client.Conn != nil {
+					_ = client.Conn.SendRaw(raw)
+				}
+			}
+		}
 		c.Close(websocket.StatusNormalClosure, "")
 	}()
 
@@ -41,6 +52,7 @@ type deviceSession struct {
 	device *Device
 	conn   *websocket.Conn
 	router *Router
+	server *Server
 }
 
 // readHello reads the initial Hello frame and validates the shared token.
@@ -81,7 +93,7 @@ func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSessi
 		ConnectedAt:  time.Now(),
 		LastSeen:     time.Now(),
 	}
-	sess := &deviceSession{device: d, conn: c, router: s.router}
+	sess := &deviceSession{device: d, conn: c, router: s.router, server: s}
 	d.Conn = sess
 	if err := s.registry.Register(d); err != nil {
 		return nil, err
@@ -121,6 +133,34 @@ func (s *deviceSession) run(ctx context.Context) {
 			continue
 		}
 		s.device.LastSeen = time.Now()
+		switch v := msg.(type) {
+		case *protocol.ForwardDial:
+			client, ok := s.server.forwards.LookupListener(v.ForwardID)
+			if !ok {
+				continue
+			}
+			s.server.forwards.OpenStream(v.StreamID, client, s)
+			s.server.router.Register(v.MsgID, client, false)
+			_ = client.SendRaw(raw)
+			continue
+		case *protocol.ForwardData:
+			client, _, ok := s.server.forwards.LookupStream(v.StreamID)
+			if !ok {
+				continue
+			}
+			_ = client.SendRaw(raw)
+			continue
+		case *protocol.ForwardClose:
+			client, _, ok := s.server.forwards.LookupStream(v.StreamID)
+			if !ok {
+				continue
+			}
+			_ = client.SendRaw(raw)
+			if v.Half == "" || v.Half == "both" {
+				s.server.forwards.CloseStream(v.StreamID)
+			}
+			continue
+		}
 		id := msgID(msg)
 		if id != "" {
 			s.router.ForwardToClient(id, raw)

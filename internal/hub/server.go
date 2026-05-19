@@ -1,6 +1,11 @@
 package hub
 
-import "net/http"
+import (
+	"log"
+	"net/http"
+
+	"github.com/qiuxiang/tether/internal/protocol"
+)
 
 type Options struct {
 	Token string
@@ -31,6 +36,20 @@ func (s *Server) Registry() *Registry        { return s.registry }
 func (s *Server) Clients() *ClientRegistry   { return s.clients }
 func (s *Server) Router() *Router            { return s.router }
 func (s *Server) Forwards() *ForwardTable    { return s.forwards }
+
+func (s *Server) broadcastDeviceEvent(kind, hostname string) {
+	ev := &protocol.Event{Kind: kind, Device: hostname}
+	raw, err := protocol.Encode(ev)
+	if err != nil {
+		log.Printf("encode device event: %v", err)
+		return
+	}
+	for _, c := range s.clients.List() {
+		if c.Conn != nil {
+			_ = c.Conn.SendRaw(raw)
+		}
+	}
+}
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
