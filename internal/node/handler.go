@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/qiuxiang/tether/internal/protocol"
 )
@@ -12,8 +11,7 @@ type ProcessHandler struct {
 	registry       *ProcessRegistry
 	logDir         string
 	mu             sync.Mutex
-	execMu         sync.Mutex
-	execCancel     map[string]context.CancelFunc
+	attachSubs     map[string]attachRec
 	fileHandler    *FileHandler
 	forwardHandler *ForwardHandler
 }
@@ -22,7 +20,7 @@ func NewProcessHandler(logDir string, cap int) *ProcessHandler {
 	return &ProcessHandler{
 		registry:       NewProcessRegistry(cap),
 		logDir:         logDir,
-		execCancel:     make(map[string]context.CancelFunc),
+		attachSubs:     make(map[string]attachRec),
 		fileHandler:    NewFileHandler(),
 		forwardHandler: NewForwardHandler(),
 	}
@@ -40,10 +38,10 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 		h.handleCaptureScreen(send, m)
 	case *protocol.List:
 		h.handleList(send, m)
-	case *protocol.Exec:
-		go h.handleExec(send, m)
-	case *protocol.ExecCancel:
-		h.handleExecCancel(m)
+	case *protocol.Attach:
+		go h.handleAttach(send, m)
+	case *protocol.Detach:
+		h.handleDetach(m)
 	case *protocol.FilePutOpen, *protocol.FileChunk, *protocol.FileAbort,
 		*protocol.FileGetOpen, *protocol.FileLocalCopy:
 		h.fileHandler.Handle(send, msg)
@@ -71,7 +69,7 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 func (h *ProcessHandler) ForwardHandler() *ForwardHandler { return h.forwardHandler }
 
 func (h *ProcessHandler) handleStart(send Sender, m *protocol.Start) {
-	p := &Process{ID: m.ProcessID, Name: m.Name, Cmd: m.Cmd}
+	p := &Process{ID: m.ProcessID, Description: m.Description, Cmd: m.Cmd}
 	err := p.Start(context.Background(), h.logDir, m.Env, m.Cwd, func(code int) {
 		send.Send(&protocol.Event{Kind: "exit", ProcessID: m.ProcessID, Code: code})
 	})
@@ -117,37 +115,70 @@ func (h *ProcessHandler) handleCaptureScreen(send Sender, m *protocol.CaptureScr
 	}})
 }
 
-func (h *ProcessHandler) handleExec(send Sender, m *protocol.Exec) {
-	ctx, cancel := context.WithCancel(context.Background())
-	if m.TimeoutMs > 0 {
-		var stop context.CancelFunc
-		ctx, stop = context.WithTimeout(ctx, time.Duration(m.TimeoutMs)*time.Millisecond)
-		defer stop()
-	}
-	h.execMu.Lock()
-	h.execCancel[m.MsgID] = cancel
-	h.execMu.Unlock()
-	defer func() {
-		h.execMu.Lock()
-		delete(h.execCancel, m.MsgID)
-		h.execMu.Unlock()
-		cancel()
-	}()
-
-	code, err := runExecStream(ctx, m, send)
-	errStr := ""
-	if err != nil {
-		errStr = err.Error()
-	}
-	send.Send(&protocol.ExecExit{MsgID: m.MsgID, Code: code, Error: errStr})
+type attachRec struct {
+	proc *Process
+	sub  *busSub
 }
 
-func (h *ProcessHandler) handleExecCancel(m *protocol.ExecCancel) {
-	h.execMu.Lock()
-	if c, ok := h.execCancel[m.MsgID]; ok {
-		c()
+func (h *ProcessHandler) handleAttach(send Sender, m *protocol.Attach) {
+	p, ok := h.registry.Get(m.ProcessID)
+	if !ok {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "process not found"})
+		return
 	}
-	h.execMu.Unlock()
+	if p.bus == nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "process has no output stream"})
+		return
+	}
+	sub := p.bus.Subscribe(m.FromOffset)
+	h.registerAttach(m.MsgID, p, sub)
+	defer h.unregisterAttach(m.MsgID)
+
+	// Initial ok-reply so client knows the subscription is live and any first
+	// ProcessOutput is genuine, not a routing artifact.
+	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true})
+
+	offset := m.FromOffset
+	if offset < 0 {
+		offset = 0
+	}
+	for chunk := range sub.Ch() {
+		send.Send(&protocol.ProcessOutput{MsgID: m.MsgID, Offset: offset, Data: chunk})
+		offset += int64(len(chunk))
+	}
+	// Bus closed → process exited. Send terminal ProcessExit so the client's
+	// stream is unblocked.
+	code := 0
+	p.mu.Lock()
+	if p.ExitCode != nil {
+		code = *p.ExitCode
+	}
+	p.mu.Unlock()
+	send.Send(&protocol.ProcessExit{MsgID: m.MsgID, Code: code})
+}
+
+func (h *ProcessHandler) handleDetach(m *protocol.Detach) {
+	h.mu.Lock()
+	rec, ok := h.attachSubs[m.MsgID]
+	if ok {
+		delete(h.attachSubs, m.MsgID)
+	}
+	h.mu.Unlock()
+	if ok && rec.proc != nil && rec.sub != nil {
+		rec.proc.bus.Unsubscribe(rec.sub)
+	}
+}
+
+func (h *ProcessHandler) registerAttach(msgID string, p *Process, sub *busSub) {
+	h.mu.Lock()
+	h.attachSubs[msgID] = attachRec{proc: p, sub: sub}
+	h.mu.Unlock()
+}
+
+func (h *ProcessHandler) unregisterAttach(msgID string) {
+	h.mu.Lock()
+	delete(h.attachSubs, msgID)
+	h.mu.Unlock()
 }
 
 // Shutdown sends SIGTERM to all running process groups and closes all
@@ -176,7 +207,7 @@ func (h *ProcessHandler) handleList(send Sender, m *protocol.List) {
 	for _, snap := range list {
 		entry := map[string]any{
 			"process_id":     snap.ID,
-			"name":           snap.Name,
+			"description":    snap.Description,
 			"cmd":            snap.Cmd,
 			"status":         snap.Status,
 			"started_at":     snap.StartedAt.Unix(),
