@@ -1,32 +1,15 @@
 package protocol
 
 // Hub → Node
-type Exec struct {
-	Type      string            `cbor:"type"`
-	MsgID     string            `cbor:"msg_id"`
-	Target    string            `cbor:"target,omitempty"`
-	Cmd       []string          `cbor:"cmd"`
-	Cwd       string            `cbor:"cwd,omitempty"`
-	Env       map[string]string `cbor:"env,omitempty"`
-	Stdin     []byte            `cbor:"stdin,omitempty"`
-	TimeoutMs int64             `cbor:"timeout_ms,omitempty"`
-}
-
-type ExecCancel struct {
-	Type   string `cbor:"type"`
-	MsgID  string `cbor:"msg_id"`
-	Target string `cbor:"target,omitempty"`
-}
-
 type Start struct {
-	Type      string            `cbor:"type"`
-	MsgID     string            `cbor:"msg_id"`
-	Target    string            `cbor:"target,omitempty"`
-	ProcessID string            `cbor:"process_id"`
-	Cmd       []string          `cbor:"cmd"`
-	Cwd       string            `cbor:"cwd,omitempty"`
-	Env       map[string]string `cbor:"env,omitempty"`
-	Name      string            `cbor:"name,omitempty"`
+	Type        string            `cbor:"type"`
+	MsgID       string            `cbor:"msg_id"`
+	Target      string            `cbor:"target,omitempty"`
+	ProcessID   string            `cbor:"process_id"`
+	Cmd         []string          `cbor:"cmd"`
+	Cwd         string            `cbor:"cwd,omitempty"`
+	Env         map[string]string `cbor:"env,omitempty"`
+	Description string            `cbor:"description,omitempty"`
 }
 
 type Stdin struct {
@@ -64,6 +47,27 @@ type List struct {
 	Limit        int    `cbor:"limit,omitempty"`
 }
 
+// Attach subscribes the originating client to a process's raw pty byte stream.
+// The hub treats this as a sticky stream (same routing as the old Exec). Node
+// replies with a one-shot Reply{ok} first (so failures surface as errors),
+// then pushes ProcessOutput frames until the process exits (terminal
+// ProcessExit) or the client sends Detach.
+type Attach struct {
+	Type       string `cbor:"type"`
+	MsgID      string `cbor:"msg_id"`
+	Target     string `cbor:"target,omitempty"`
+	ProcessID  string `cbor:"process_id"`
+	FromOffset int64  `cbor:"from_offset,omitempty"`
+}
+
+// Detach cancels a prior Attach. The process keeps running.
+type Detach struct {
+	Type      string `cbor:"type"`
+	MsgID     string `cbor:"msg_id"`
+	Target    string `cbor:"target,omitempty"`
+	ProcessID string `cbor:"process_id"`
+}
+
 // Node → Hub
 type Hello struct {
 	Type         string `cbor:"type"`
@@ -83,26 +87,27 @@ type Reply struct {
 	Data  map[string]any `cbor:"data,omitempty"`
 }
 
-type ExecOutput struct {
-	Type   string `cbor:"type"`
-	MsgID  string `cbor:"msg_id"`
-	Stream string `cbor:"stream"` // "stdout" | "stderr"
-	Data   []byte `cbor:"data"`
-}
-
-type ExecExit struct {
-	Type  string `cbor:"type"`
-	MsgID string `cbor:"msg_id"`
-	Code  int    `cbor:"code"`
-	Error string `cbor:"error,omitempty"`
-}
-
 type Event struct {
 	Type      string `cbor:"type"`
 	Kind      string `cbor:"kind"` // "exit" | "device_online" | "device_offline"
 	ProcessID string `cbor:"process_id,omitempty"`
 	Code      int    `cbor:"code,omitempty"`
 	Device    string `cbor:"device,omitempty"`
+}
+
+// ProcessOutput is a chunk of raw pty bytes streamed to an Attach subscriber.
+type ProcessOutput struct {
+	Type   string `cbor:"type"`
+	MsgID  string `cbor:"msg_id"`
+	Offset int64  `cbor:"offset"`
+	Data   []byte `cbor:"data"`
+}
+
+// ProcessExit terminates an Attach stream when the process has exited.
+type ProcessExit struct {
+	Type  string `cbor:"type"`
+	MsgID string `cbor:"msg_id"`
+	Code  int    `cbor:"code"`
 }
 
 // ListDevices is a hub-local request (no Target).
@@ -177,19 +182,19 @@ type Message interface {
 	msgType() string
 }
 
-func (m *Exec) msgType() string        { return "exec" }
-func (m *ExecCancel) msgType() string  { return "exec_cancel" }
 func (m *Start) msgType() string       { return "start" }
 func (m *Stdin) msgType() string       { return "stdin" }
 func (m *Kill) msgType() string        { return "kill" }
 func (m *CaptureScreen) msgType() string  { return "capture_screen" }
 func (m *List) msgType() string        { return "list" }
+func (m *Attach) msgType() string      { return "attach" }
+func (m *Detach) msgType() string      { return "detach" }
 func (m *ListDevices) msgType() string { return "list_devices" }
 func (m *Hello) msgType() string       { return "hello" }
 func (m *Reply) msgType() string       { return "reply" }
-func (m *ExecOutput) msgType() string  { return "exec_output" }
-func (m *ExecExit) msgType() string    { return "exec_exit" }
 func (m *Event) msgType() string       { return "event" }
+func (m *ProcessOutput) msgType() string { return "process_output" }
+func (m *ProcessExit) msgType() string   { return "process_exit" }
 func (m *FileGetOpen) msgType() string   { return "file_get_open" }
 func (m *FilePutOpen) msgType() string   { return "file_put_open" }
 func (m *FileChunk) msgType() string     { return "file_chunk" }

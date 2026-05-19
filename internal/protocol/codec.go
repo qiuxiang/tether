@@ -40,10 +40,6 @@ func Encode(m Message) ([]byte, error) {
 
 func setType(m Message) {
 	switch v := m.(type) {
-	case *Exec:
-		v.Type = m.msgType()
-	case *ExecCancel:
-		v.Type = m.msgType()
 	case *Start:
 		v.Type = m.msgType()
 	case *Stdin:
@@ -54,17 +50,21 @@ func setType(m Message) {
 		v.Type = m.msgType()
 	case *List:
 		v.Type = m.msgType()
+	case *Attach:
+		v.Type = m.msgType()
+	case *Detach:
+		v.Type = m.msgType()
 	case *ListDevices:
 		v.Type = m.msgType()
 	case *Hello:
 		v.Type = m.msgType()
 	case *Reply:
 		v.Type = m.msgType()
-	case *ExecOutput:
-		v.Type = m.msgType()
-	case *ExecExit:
-		v.Type = m.msgType()
 	case *Event:
+		v.Type = m.msgType()
+	case *ProcessOutput:
+		v.Type = m.msgType()
+	case *ProcessExit:
 		v.Type = m.msgType()
 	case *FileGetOpen:
 		v.Type = m.msgType()
@@ -101,10 +101,6 @@ func Decode(data []byte) (Message, error) {
 	}
 	var m Message
 	switch hdr.Type {
-	case "exec":
-		m = &Exec{}
-	case "exec_cancel":
-		m = &ExecCancel{}
 	case "start":
 		m = &Start{}
 	case "stdin":
@@ -115,18 +111,22 @@ func Decode(data []byte) (Message, error) {
 		m = &CaptureScreen{}
 	case "list":
 		m = &List{}
+	case "attach":
+		m = &Attach{}
+	case "detach":
+		m = &Detach{}
 	case "list_devices":
 		m = &ListDevices{}
 	case "hello":
 		m = &Hello{}
 	case "reply":
 		m = &Reply{}
-	case "exec_output":
-		m = &ExecOutput{}
-	case "exec_exit":
-		m = &ExecExit{}
 	case "event":
 		m = &Event{}
+	case "process_output":
+		m = &ProcessOutput{}
+	case "process_exit":
+		m = &ProcessExit{}
 	case "file_get_open":
 		m = &FileGetOpen{}
 	case "file_put_open":
