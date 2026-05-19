@@ -100,3 +100,78 @@ func toLines(v any) []string {
 	}
 	return out
 }
+
+func TestWriteFileNew(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.txt")
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.WriteFileReq{MsgID: "1", Path: p, Content: []byte("hello")})
+	r := lastEditReply(t, s)
+	require.True(t, r.OK, "err: %s", r.Error)
+	got, err := os.ReadFile(p)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(got))
+	entries, _ := os.ReadDir(dir)
+	require.Len(t, entries, 1)
+}
+
+func TestWriteFileNoOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.txt")
+	require.NoError(t, os.WriteFile(p, []byte("old"), 0o644))
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.WriteFileReq{MsgID: "1", Path: p, Content: []byte("new")})
+	r := lastEditReply(t, s)
+	require.False(t, r.OK)
+	require.Equal(t, "exists", r.Error)
+	got, _ := os.ReadFile(p)
+	require.Equal(t, "old", string(got))
+}
+
+func TestWriteFileOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.txt")
+	require.NoError(t, os.WriteFile(p, []byte("old"), 0o644))
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.WriteFileReq{MsgID: "1", Path: p, Content: []byte("new"), Overwrite: true})
+	r := lastEditReply(t, s)
+	require.True(t, r.OK)
+	got, _ := os.ReadFile(p)
+	require.Equal(t, "new", string(got))
+}
+
+func TestWriteFileMissingParent(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "sub", "out.txt")
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.WriteFileReq{MsgID: "1", Path: p, Content: []byte("x")})
+	r := lastEditReply(t, s)
+	require.False(t, r.OK)
+}
+
+func TestWriteFileCreateDirs(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "sub", "out.txt")
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.WriteFileReq{MsgID: "1", Path: p, Content: []byte("x"), CreateDirs: true})
+	r := lastEditReply(t, s)
+	require.True(t, r.OK, "err: %s", r.Error)
+	got, _ := os.ReadFile(p)
+	require.Equal(t, "x", string(got))
+}
+
+func TestWriteFileTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "big")
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.WriteFileReq{MsgID: "1", Path: p, Content: make([]byte, editMaxBytes+1)})
+	r := lastEditReply(t, s)
+	require.False(t, r.OK)
+	require.Equal(t, "too_large", r.Error)
+}

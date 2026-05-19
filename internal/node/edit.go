@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -31,11 +32,86 @@ func (h *EditHandler) Handle(send Sender, msg protocol.Message) {
 	}
 }
 
-// handleWrite and handleEdit are placeholders implemented in Tasks 3 and 4.
 func (h *EditHandler) handleWrite(send Sender, m *protocol.WriteFileReq) {
-	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not_implemented"})
+	path, err := expandPath(m.Path)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	if int64(len(m.Content)) > editMaxBytes {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "too_large"})
+		return
+	}
+	bytes, sum, err := atomicWrite(path, m.Content, m.Overwrite, m.CreateDirs)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
+		"bytes":  bytes,
+		"sha256": sum,
+	}})
 }
 
+// atomicWrite writes data to path via a same-directory temp file, fsyncs,
+// then renames over the destination. Returns (bytes, sha256-hex, err).
+// err.Error() is the spec error code when possible ("exists", "not_found",
+// "permission_denied", "is_directory").
+func atomicWrite(path string, data []byte, overwrite, createDirs bool) (int64, string, error) {
+	if info, err := os.Lstat(path); err == nil {
+		if info.IsDir() {
+			return 0, "", errors.New("is_directory")
+		}
+		if !overwrite {
+			return 0, "", errors.New("exists")
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return 0, "", errors.New(classifyErr(err))
+	}
+
+	dir := filepath.Dir(path)
+	if _, err := os.Stat(dir); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return 0, "", errors.New(classifyErr(err))
+		}
+		if !createDirs {
+			return 0, "", errors.New("not_found")
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return 0, "", errors.New(classifyErr(err))
+		}
+	}
+
+	tmp, err := os.CreateTemp(dir, ".tether-edit-*.tmp")
+	if err != nil {
+		return 0, "", errors.New(classifyErr(err))
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { os.Remove(tmpPath) }
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		cleanup()
+		return 0, "", err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		cleanup()
+		return 0, "", err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return 0, "", err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		cleanup()
+		return 0, "", errors.New(classifyErr(err))
+	}
+	sum := sha256.Sum256(data)
+	return int64(len(data)), hex.EncodeToString(sum[:]), nil
+}
+
+// handleEdit is a placeholder implemented in Task 4.
 func (h *EditHandler) handleEdit(send Sender, m *protocol.EditFileReq) {
 	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not_implemented"})
 }
