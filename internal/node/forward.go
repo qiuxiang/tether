@@ -3,7 +3,9 @@ package node
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 
@@ -141,14 +143,23 @@ func (h *ForwardHandler) Unlisten(send Sender, m *protocol.ForwardUnlisten) {
 }
 
 // Data writes bytes from the hub/client side into the local TCP connection.
-func (h *ForwardHandler) Data(_ Sender, m *protocol.ForwardData) {
+func (h *ForwardHandler) Data(send Sender, m *protocol.ForwardData) {
 	h.mu.Lock()
 	fs, ok := h.streams[m.StreamID]
 	h.mu.Unlock()
 	if !ok {
 		return
 	}
-	fs.conn.Write(m.Data)
+	if _, err := fs.conn.Write(m.Data); err != nil {
+		// Notify the peer that this stream is dead, then clean up locally.
+		send.Send(&protocol.ForwardClose{StreamID: m.StreamID, Half: "both"})
+		h.mu.Lock()
+		if cur, still := h.streams[m.StreamID]; still && cur == fs {
+			delete(h.streams, m.StreamID)
+		}
+		h.mu.Unlock()
+		fs.conn.Close()
+	}
 }
 
 // Close half-closes or fully closes a stream.
@@ -217,7 +228,7 @@ func (h *ForwardHandler) readPump(send Sender, sid string, conn net.Conn) {
 			// io.EOF means clean close from remote → signal write-end closed.
 			// Any other error → both sides closed.
 			half := "both"
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				half = "write"
 			}
 			send.Send(&protocol.ForwardClose{StreamID: sid, Half: half})

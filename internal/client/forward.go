@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -148,6 +149,8 @@ func (m *ForwardManager) Deliver(msg protocol.Message) {
 		c, err := net.Dial("tcp", r.DestAddr())
 		if err != nil {
 			_ = m.sender.Send(&protocol.Reply{MsgID: v.MsgID, OK: false, Error: "dial: " + err.Error()})
+			// Also close the node-side conn that's waiting for this dial-back.
+			_ = m.sender.Send(&protocol.ForwardClose{Target: r.Device, StreamID: v.StreamID, Half: "both"})
 			return
 		}
 		m.mu.Lock()
@@ -225,7 +228,7 @@ func (m *ForwardManager) readPump(sid string, c net.Conn, device string) {
 		}
 		if err != nil {
 			half := "both"
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				half = "write"
 			}
 			_ = m.sender.Send(&protocol.ForwardClose{Target: device, StreamID: sid, Half: half})
