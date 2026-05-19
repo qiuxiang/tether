@@ -78,6 +78,12 @@ func setType(m Message) {
 		v.Type = m.msgType()
 	case *FileLocalCopy:
 		v.Type = m.msgType()
+	case *ReadFileReq:
+		v.Type = m.msgType()
+	case *WriteFileReq:
+		v.Type = m.msgType()
+	case *EditFileReq:
+		v.Type = m.msgType()
 	case *ForwardListen:
 		v.Type = m.msgType()
 	case *ForwardUnlisten:
@@ -139,6 +145,12 @@ func Decode(data []byte) (Message, error) {
 		m = &FileRelay{}
 	case "file_local_copy":
 		m = &FileLocalCopy{}
+	case "read_file":
+		m = &ReadFileReq{}
+	case "write_file":
+		m = &WriteFileReq{}
+	case "edit_file":
+		m = &EditFileReq{}
 	case "forward_listen":
 		m = &ForwardListen{}
 	case "forward_unlisten":

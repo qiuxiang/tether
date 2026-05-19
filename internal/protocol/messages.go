@@ -177,6 +177,42 @@ type FileLocalCopy struct {
 	Overwrite bool   `cbor:"overwrite,omitempty"`
 }
 
+// ReadFileReq — client → hub → node. Reads a slice of a file's lines.
+// Reply.Data: {lines: [][]byte, total_lines int, truncated bool, sha256 string, binary bool}.
+type ReadFileReq struct {
+	Type   string `cbor:"type"`
+	MsgID  string `cbor:"msg_id"`
+	Target string `cbor:"target,omitempty"`
+	Path   string `cbor:"path"`
+	Offset int    `cbor:"offset,omitempty"`
+	Limit  int    `cbor:"limit,omitempty"`
+}
+
+// WriteFileReq — client → hub → node. Atomic write (temp + fsync + rename).
+// Reply.Data: {bytes int64, sha256 string}.
+type WriteFileReq struct {
+	Type       string `cbor:"type"`
+	MsgID      string `cbor:"msg_id"`
+	Target     string `cbor:"target,omitempty"`
+	Path       string `cbor:"path"`
+	Content    []byte `cbor:"content"`
+	Overwrite  bool   `cbor:"overwrite,omitempty"`
+	CreateDirs bool   `cbor:"create_dirs,omitempty"`
+}
+
+// EditFileReq — client → hub → node. Replaces OldString with NewString.
+// When ReplaceAll is false, OldString must occur exactly once.
+// Reply.Data: {replacements int, sha256 string}.
+type EditFileReq struct {
+	Type       string `cbor:"type"`
+	MsgID      string `cbor:"msg_id"`
+	Target     string `cbor:"target,omitempty"`
+	Path       string `cbor:"path"`
+	OldString  []byte `cbor:"old_string"`
+	NewString  []byte `cbor:"new_string"`
+	ReplaceAll bool   `cbor:"replace_all,omitempty"`
+}
+
 // Marker interface for any message.
 type Message interface {
 	msgType() string
@@ -201,3 +237,6 @@ func (m *FileChunk) msgType() string     { return "file_chunk" }
 func (m *FileAbort) msgType() string     { return "file_abort" }
 func (m *FileRelay) msgType() string     { return "file_relay" }
 func (m *FileLocalCopy) msgType() string { return "file_local_copy" }
+func (m *ReadFileReq) msgType() string   { return "read_file" }
+func (m *WriteFileReq) msgType() string  { return "write_file" }
+func (m *EditFileReq) msgType() string   { return "edit_file" }

@@ -184,3 +184,30 @@ func TestRoundTripCaptureScreen(t *testing.T) {
 		}
 	}
 }
+
+func TestCodecRoundTripReadFile(t *testing.T) {
+	in := &ReadFileReq{MsgID: "m1", Target: "n1", Path: "/etc/hosts", Offset: 10, Limit: 50}
+	b, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(b)
+	require.NoError(t, err)
+	require.Equal(t, in, out)
+}
+
+func TestCodecRoundTripWriteFile(t *testing.T) {
+	in := &WriteFileReq{MsgID: "m2", Target: "n1", Path: "/tmp/x", Content: []byte("hello"), Overwrite: true, CreateDirs: false}
+	b, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(b)
+	require.NoError(t, err)
+	require.Equal(t, in, out)
+}
+
+func TestCodecRoundTripEditFile(t *testing.T) {
+	in := &EditFileReq{MsgID: "m3", Target: "n1", Path: "/tmp/x", OldString: []byte("foo"), NewString: []byte("bar"), ReplaceAll: true}
+	b, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(b)
+	require.NoError(t, err)
+	require.Equal(t, in, out)
+}
