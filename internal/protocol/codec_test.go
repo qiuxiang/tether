@@ -26,8 +26,8 @@ func TestEncodeDecodeHello(t *testing.T) {
 	}
 }
 
-func TestEncodeDecodeExecOutput(t *testing.T) {
-	msg := ExecOutput{MsgID: "abc", Stream: "stdout", Data: []byte{0x00, 0xFF, 0x80, 0x7F}}
+func TestEncodeDecodeProcessOutput(t *testing.T) {
+	msg := ProcessOutput{MsgID: "abc", Offset: 42, Data: []byte{0x00, 0xFF, 0x80, 0x7F}}
 	data, err := Encode(&msg)
 	if err != nil {
 		t.Fatal(err)
@@ -36,9 +36,12 @@ func TestEncodeDecodeExecOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := decoded.(*ExecOutput)
+	got := decoded.(*ProcessOutput)
 	if !bytes.Equal(got.Data, msg.Data) {
 		t.Fatalf("binary data round-trip failed: %v", got.Data)
+	}
+	if got.Offset != 42 {
+		t.Fatalf("offset round-trip: got %d, want 42", got.Offset)
 	}
 }
 
@@ -62,16 +65,41 @@ func TestRoundTripListDevices(t *testing.T) {
 	require.Equal(t, "list_devices", got.Type)
 }
 
-func TestRoundTripExecWithTarget(t *testing.T) {
-	in := &Exec{MsgID: "m1", Target: "host-a", Cmd: []string{"sh", "-c", "ls"}}
+func TestRoundTripStartWithTarget(t *testing.T) {
+	in := &Start{MsgID: "m1", Target: "host-a", ProcessID: "p1", Cmd: []string{"sh", "-c", "ls"}, Description: "list files"}
 	raw, err := Encode(in)
 	require.NoError(t, err)
 	out, err := Decode(raw)
 	require.NoError(t, err)
-	got, ok := out.(*Exec)
+	got, ok := out.(*Start)
 	require.True(t, ok)
 	require.Equal(t, "host-a", got.Target)
 	require.Equal(t, "m1", got.MsgID)
+	require.Equal(t, "p1", got.ProcessID)
+	require.Equal(t, "list files", got.Description)
+}
+
+func TestRoundTripAttach(t *testing.T) {
+	in := &Attach{MsgID: "m1", Target: "host-a", ProcessID: "p1", FromOffset: 1024}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*Attach)
+	require.True(t, ok)
+	require.Equal(t, "p1", got.ProcessID)
+	require.Equal(t, int64(1024), got.FromOffset)
+}
+
+func TestRoundTripProcessExit(t *testing.T) {
+	in := &ProcessExit{MsgID: "m1", Code: 137}
+	raw, err := Encode(in)
+	require.NoError(t, err)
+	out, err := Decode(raw)
+	require.NoError(t, err)
+	got, ok := out.(*ProcessExit)
+	require.True(t, ok)
+	require.Equal(t, 137, got.Code)
 }
 
 func TestRoundTripHelloRole(t *testing.T) {
