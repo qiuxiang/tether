@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -45,6 +46,34 @@ func TestStartPTY_WinSize(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected stty size %q in output, got lines=%q", want, lines)
+	}
+}
+
+func TestStartPTY_BusReceivesOutputAndClosesOnExit(t *testing.T) {
+	dir := t.TempDir()
+	p := &Process{ID: "p1", Cmd: []string{"sh", "-c", "printf hello"}}
+	exited := make(chan int, 1)
+	if err := p.Start(context.Background(), dir, nil, "", func(code int) { exited <- code }); err != nil {
+		t.Fatal(err)
+	}
+
+	sub := p.bus.Subscribe(0)
+	var got []byte
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case chunk, ok := <-sub.Ch():
+			if !ok {
+				if !bytes.Contains(got, []byte("hello")) {
+					t.Fatalf("bus output missing 'hello': %q", got)
+				}
+				<-exited
+				return
+			}
+			got = append(got, chunk...)
+		case <-deadline:
+			t.Fatalf("timeout, got=%q", got)
+		}
 	}
 }
 

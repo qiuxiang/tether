@@ -11,7 +11,6 @@ import (
 
 	"github.com/aymanbagabas/go-pty"
 	"github.com/hinshun/vt10x"
-	"github.com/qiuxiang/tether/internal/protocol"
 )
 
 // closeSlave closes only the slave end of the PTY when possible. On Unix
@@ -22,65 +21,6 @@ func closeSlave(p pty.Pty) {
 	if u, ok := p.(pty.UnixPty); ok {
 		_ = u.Slave().Close()
 	}
-}
-
-// runExecStreamPTY runs an exec command attached to a PTY. Output bytes
-// are fed into a vt10x terminal and the rendered screen (ANSI sequences
-// resolved, CR overwrites applied, colors stripped) is returned as a
-// single ExecOutput frame after the process exits — exec is one-shot, so
-// there's no value in streaming raw escape-laden chunks the way
-// start_process does.
-func runExecStreamPTY(ctx context.Context, m *protocol.Exec, send Sender) (int, error) {
-	p, err := pty.New()
-	if err != nil {
-		return -1, err
-	}
-	_ = p.Resize(vtCols, ptyVisibleRows)
-
-	c := p.CommandContext(ctx, m.Cmd[0], m.Cmd[1:]...)
-	c.Dir = m.Cwd
-	c.Env = mergeEnv(m.Env)
-	c.SysProcAttr = childAttrPTY()
-
-	if err := c.Start(); err != nil {
-		p.Close()
-		return -1, err
-	}
-
-	if len(m.Stdin) > 0 {
-		p.Write(m.Stdin)
-	}
-
-	vt := vt10x.New(vt10x.WithSize(vtCols, vtRows))
-	var copyDone sync.WaitGroup
-	copyDone.Add(1)
-	go func() {
-		defer copyDone.Done()
-		io.Copy(vt, p)
-	}()
-
-	// Wait for the process to finish. Then close the slave end so the master's
-	// Read returns EOF naturally — only after the reader has drained whatever
-	// bytes the child wrote just before exiting. Closing the master directly
-	// here would discard buffered slave→master data that the reader hasn't
-	// picked up yet, which surfaced as a flaky "TTY" detection test under load.
-	werr := c.Wait()
-	closeSlave(p)
-	copyDone.Wait()
-	p.Close()
-
-	code := 0
-	if exitErr, ok := werr.(*exec.ExitError); ok {
-		code = exitErr.ExitCode()
-	} else if werr != nil {
-		code = -1
-	}
-
-	rendered := renderAll(vt)
-	if len(rendered) > 0 {
-		send.Send(&protocol.ExecOutput{MsgID: m.MsgID, Stream: "stdout", Data: []byte(rendered)})
-	}
-	return code, nil
 }
 
 // startPTY launches a long-running process in a PTY, mirroring startPipe's lifecycle.
@@ -112,6 +52,7 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 	c.SysProcAttr = childAttrPTY()
 
 	proc.vt = vt10x.New(vt10x.WithSize(vtCols, vtRows))
+	proc.bus = newByteBus()
 
 	if err := c.Start(); err != nil {
 		p.Close()
@@ -142,7 +83,7 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 	copyDone.Add(1)
 	go func() {
 		defer copyDone.Done()
-		io.Copy(io.MultiWriter(logFile, &vtSink{p: proc}), p)
+		io.Copy(io.MultiWriter(logFile, &vtSink{p: proc}, proc.bus), p)
 	}()
 
 	go func() {
@@ -167,6 +108,7 @@ func (proc *Process) startPTY(ctx context.Context, logDir string, env map[string
 		copyDone.Wait()
 		p.Close()
 		logFile.Close()
+		proc.bus.Close()
 		cancel()
 		onExit(code)
 	}()
