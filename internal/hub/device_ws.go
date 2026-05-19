@@ -191,18 +191,32 @@ func (s *deviceSession) run(ctx context.Context) {
 			_ = owner.SendRaw(raw)
 			continue
 		case *protocol.ForwardData:
-			client, _, ok := s.server.forwards.LookupStream(v.StreamID)
+			client, node, ok := s.server.forwards.LookupStream(v.StreamID)
 			if !ok {
 				continue
 			}
-			_ = client.SendRaw(raw)
+			// Route to the opposite side of the stream.
+			if s == client {
+				if node != nil {
+					_ = node.SendRaw(raw)
+				}
+			} else {
+				_ = client.SendRaw(raw)
+			}
 			continue
 		case *protocol.ForwardClose:
-			client, _, ok := s.server.forwards.LookupStream(v.StreamID)
+			client, node, ok := s.server.forwards.LookupStream(v.StreamID)
 			if !ok {
 				continue
 			}
-			_ = client.SendRaw(raw)
+			// Route to the opposite side of the stream.
+			if s == client {
+				if node != nil {
+					_ = node.SendRaw(raw)
+				}
+			} else {
+				_ = client.SendRaw(raw)
+			}
 			if v.Half == "" || v.Half == "both" {
 				s.server.forwards.CloseStream(v.StreamID)
 			}
