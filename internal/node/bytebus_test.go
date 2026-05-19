@@ -51,14 +51,42 @@ func TestByteBus_CloseEndsSubscribers(t *testing.T) {
 	b := newByteBus()
 	sub := b.Subscribe(0)
 	b.Close()
-	select {
-	case _, ok := <-sub.Ch():
-		if ok {
-			// allow drained backlog frames; loop until channel closes
+	deadline := time.After(200 * time.Millisecond)
+	for {
+		select {
+		case _, ok := <-sub.Ch():
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("subscriber channel not closed after bus close")
 		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("subscriber not closed after bus close")
 	}
+}
+
+func TestByteBus_ConcurrentWriteAndUnsubscribe(t *testing.T) {
+	b := newByteBus()
+	subs := make([]*busSub, 50)
+	for i := range subs {
+		subs[i] = b.Subscribe(0)
+		// Drain in the background so Writes don't block forever.
+		go func(s *busSub) {
+			for range s.Ch() {
+			}
+		}(subs[i])
+	}
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 1000; i++ {
+			b.Write([]byte("x"))
+		}
+		close(done)
+	}()
+	for _, s := range subs {
+		b.Unsubscribe(s)
+	}
+	<-done
+	b.Close()
 }
 
 func drain(t *testing.T, sub *busSub, n int, timeout time.Duration) []byte {
