@@ -123,31 +123,33 @@ Chunk size 256 KiB。每次传输返回 `{ok, bytes, sha256, duration_ms}`。
 
 ### 端口转发类
 
-`stream_id` 由发起 accept 的一侧生成 uuid，全局唯一；`forward_id` 由 client 启动时为每条规则分配。
+`stream_id` 由发起 accept 的一侧生成 uuid，全局唯一；`forward_id` 由发起节点（node）启动时为每条规则分配。
 
-**Client → (Hub →) Node：**
+> **注意：** 转发规则配置在 node 的 `config.yaml` 的 `forwards:` 字段下，由 `tether join` 启动时读取并生效。MCP client（`tether mcp`）在转发中没有任何角色——两端均为 node。
+
+**Node (local) → (Hub →) Node (peer)：**
 
 | `type` | 字段 | 说明 |
 |---|---|---|
-| `forward_listen` | `msg_id, target, forward_id, listen_addr, dest_host, dest_port` | -R 规则：让 node 在 `listen_addr` 起 TCP listener。reply `{ok, error?}`。Hub 记 `forward_id → client_ws` |
-| `forward_unlisten` | `msg_id, target, forward_id` | 关闭 node 上对应 listener；Hub 同步清 listeners 表 |
-| `forward_dial` | `msg_id, target, stream_id, dest_host, dest_port` | -L 路径：node 拨号 `dest_host:dest_port`，reply `{ok, error?}`。Hub 记 `stream_id → (client_ws, node_ws)` |
+| `forward_listen` | `msg_id, target, forward_id, listen_addr, dest_host, dest_port` | -R 规则：让对端 node 在 `listen_addr` 起 TCP listener。reply `{ok, error?}`。Hub 记 `forward_id → initiating_node_ws` |
+| `forward_unlisten` | `msg_id, target, forward_id` | 关闭对端 node 上对应 listener；Hub 同步清 listeners 表 |
+| `forward_dial` | `msg_id, target, stream_id, dest_host, dest_port` | -L 路径：对端 node 拨号 `dest_host:dest_port`，reply `{ok, error?}`。Hub 记 `stream_id → (local_node_ws, peer_node_ws)` |
 | `forward_data` | `target, stream_id, data` | 双向；fire-and-forget；Hub 按 `stream_id` 转发。单帧软上限 32 KiB |
 | `forward_close` | `target, stream_id, half?` | `half ∈ {"read","write","both"}`（缺省 `"both"`）；fire-and-forget |
 
-**Node → (Hub →) Client：**
+**Node (peer) → (Hub →) Node (local)：**
 
 | `type` | 字段 | 说明 |
 |---|---|---|
-| `forward_dial` | `msg_id, stream_id, forward_id` | -R 路径：node accept 后请 client 拨号；client 用 `forward_id` 查本地 dest 信息 dial。Hub 按 `forward_id → client_ws` 路由 |
+| `forward_dial` | `msg_id, stream_id, forward_id` | -R 路径：对端 node accept 后请本端 node 拨号；本端用 `forward_id` 查本地 dest 信息 dial。Hub 按 `forward_id → initiating_node_ws` 路由 |
 | `forward_data`, `forward_close` | 同上 | 对称 |
 
-**Hub → Client 事件（扩展 `event.kind`）：**
+**Hub → Node 事件（扩展 `event.kind`）：**
 
 | `kind` | 字段 | 说明 |
 |---|---|---|
-| `device_online` | `device` | node 完成握手、注册成功时推送给所有 client；client 用此事件重发 -R 规则的 `forward_listen` |
-| `device_offline` | `device` | node WS 断开时推送；client 标记相关 -R 规则待恢复 |
+| `device_online` | `device` | node 完成握手、注册成功时推送给所有在线 node；本端 node 用此事件重发 -R 规则的 `forward_listen` |
+| `device_offline` | `device` | node WS 断开时推送；本端 node 标记相关 -R 规则待恢复 |
 
 ## 5. 进程模型
 
@@ -239,7 +241,12 @@ hub_url: "wss://tether.example.com/device"
 token: "xxx"
 hostname_override: ""                  # 默认 os.Hostname()
 log_dir: "~/.local/share/tether/logs"
+forwards:                              # 可选，端口转发规则（见 §4 端口转发类）
+  - "L 9000:peer:5037"                 # 本节点 127.0.0.1:9000 → peer 的 localhost:5037
+  - "R peer:8080:3000"                 # peer 的 127.0.0.1:8080 → 本节点的 127.0.0.1:3000
 ```
+
+转发规则配置在 node 自身的 `config.yaml` 下，MCP client（`tether mcp`）无需配置任何转发项。
 
 **MCP client 配置（`~/.config/tether/client.yaml`）：**
 
@@ -289,4 +296,4 @@ token: "xxx"
 
 ## 10. 参考文档
 
-- [`docs/superpowers/specs/2026-05-19-port-forwarding-design.md`](superpowers/specs/2026-05-19-port-forwarding-design.md) — 端口转发详细设计（背景、架构、配置语法、wire protocol、错误处理、测试计划）
+- [`docs/superpowers/specs/2026-05-19-port-forwarding-design.md`](superpowers/specs/2026-05-19-port-forwarding-design.md) — 端口转发详细设计（背景、架构、配置语法、wire protocol、错误处理、测试计划）。**注：** 原始设计将转发配置放在 MCP client 侧（`client.yaml`），实现时已调整为配置在 node 的 `config.yaml` 的 `forwards:` 字段，MCP client 不参与转发。

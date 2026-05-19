@@ -98,24 +98,27 @@ Single file only — directories are not supported (use tar/zip on the source fi
 
 ### Port forwarding
 
-Configure `tether mcp` to multiplex TCP forwards over its hub connection:
+Configure `tether join` (in the node's `config.yaml`) to multiplex TCP forwards
+over the hub:
 
 ```yaml
-hub_url: "wss://tether.example.com/client"
+hub_url: "wss://tether.example.com/device"
 token: "your-secret-token"
+hostname_override: "coder"
 forwards:
-  - "L 9000:mac:5037"           # local 127.0.0.1:9000 → mac's localhost:5037
-  - "L 0.0.0.0:9000:mac:5037"   # local 0.0.0.0:9000 → mac's localhost:5037
-  - "R mac:8080:3000"           # mac's 127.0.0.1:8080 → local 127.0.0.1:3000
-  - "R mac:0.0.0.0:8080:3000"   # mac's 0.0.0.0:8080 → local 127.0.0.1:3000
+  - "L 9000:mac:5037"           # bind 127.0.0.1:9000 on this node → mac's localhost:5037
+  - "L 0.0.0.0:9000:mac:5037"   # bind 0.0.0.0:9000 on this node → mac's localhost:5037
+  - "R mac:8080:3000"           # mac binds 127.0.0.1:8080 → this node's 127.0.0.1:3000
+  - "R mac:0.0.0.0:8080:3000"   # mac binds 0.0.0.0:8080 → this node's 127.0.0.1:3000
 ```
 
-Syntax mirrors ssh. `L` = local listener forwarded to the named device; `R` =
-remote (node-side) listener forwarded back. `bind` defaults to `127.0.0.1`
-and the `host` segment defaults to `localhost`. Only TCP. Rules are loaded
-at `tether mcp` startup; restart `tether mcp` to change them. A node going
-offline keeps `L` listeners up (the next accept will close immediately) and
-re-establishes `R` listeners automatically when it reconnects.
+Syntax mirrors ssh. `L` = listener on the local node, forwarded to the named
+peer device. `R` = listener on the peer device, forwarded back to the local
+node. `bind` defaults to `127.0.0.1` and `host` defaults to `localhost`.
+Only TCP. Rules are loaded at `tether join` startup; restart the node service
+to change them. A peer going offline keeps `L` listeners up (the next accept
+closes immediately) and re-establishes `R` listeners automatically when the
+peer reconnects.
 
 ## Service files
 
