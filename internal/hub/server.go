@@ -12,6 +12,7 @@ type Server struct {
 	clients  *ClientRegistry
 	router   *Router
 	relay    *RelayCoordinator
+	forwards *ForwardTable
 }
 
 func NewServer(opts Options) *Server {
@@ -20,14 +21,16 @@ func NewServer(opts Options) *Server {
 		registry: NewRegistry(),
 		clients:  NewClientRegistry(),
 		router:   NewRouter(),
+		forwards: NewForwardTable(),
 	}
 	s.relay = NewRelayCoordinator(s)
 	return s
 }
 
-func (s *Server) Registry() *Registry      { return s.registry }
-func (s *Server) Clients() *ClientRegistry { return s.clients }
-func (s *Server) Router() *Router          { return s.router }
+func (s *Server) Registry() *Registry        { return s.registry }
+func (s *Server) Clients() *ClientRegistry   { return s.clients }
+func (s *Server) Router() *Router            { return s.router }
+func (s *Server) Forwards() *ForwardTable    { return s.forwards }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
