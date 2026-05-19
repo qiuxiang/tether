@@ -175,3 +175,66 @@ func TestWriteFileTooLarge(t *testing.T) {
 	require.False(t, r.OK)
 	require.Equal(t, "too_large", r.Error)
 }
+
+func TestEditFileUnique(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	require.NoError(t, os.WriteFile(p, []byte("alpha\nbeta\ngamma\n"), 0o644))
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.EditFileReq{MsgID: "1", Path: p, OldString: []byte("beta"), NewString: []byte("BETA")})
+	r := lastEditReply(t, s)
+	require.True(t, r.OK, "err: %s", r.Error)
+	require.Equal(t, 1, r.Data["replacements"])
+	got, _ := os.ReadFile(p)
+	require.Equal(t, "alpha\nBETA\ngamma\n", string(got))
+}
+
+func TestEditFileNotUnique(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	require.NoError(t, os.WriteFile(p, []byte("foo foo\n"), 0o644))
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.EditFileReq{MsgID: "1", Path: p, OldString: []byte("foo"), NewString: []byte("bar")})
+	r := lastEditReply(t, s)
+	require.False(t, r.OK)
+	require.Equal(t, "not_unique", r.Error)
+	got, _ := os.ReadFile(p)
+	require.Equal(t, "foo foo\n", string(got))
+}
+
+func TestEditFileReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	require.NoError(t, os.WriteFile(p, []byte("foo foo foo\n"), 0o644))
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.EditFileReq{MsgID: "1", Path: p, OldString: []byte("foo"), NewString: []byte("bar"), ReplaceAll: true})
+	r := lastEditReply(t, s)
+	require.True(t, r.OK)
+	require.Equal(t, 3, r.Data["replacements"])
+	got, _ := os.ReadFile(p)
+	require.Equal(t, "bar bar bar\n", string(got))
+}
+
+func TestEditFileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	require.NoError(t, os.WriteFile(p, []byte("alpha\n"), 0o644))
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.EditFileReq{MsgID: "1", Path: p, OldString: []byte("beta"), NewString: []byte("x")})
+	r := lastEditReply(t, s)
+	require.False(t, r.OK)
+	require.Equal(t, "not_found", r.Error)
+}
+
+func TestEditFileMissing(t *testing.T) {
+	h := NewEditHandler()
+	s := &sliceSender{}
+	h.Handle(s, &protocol.EditFileReq{MsgID: "1", Path: "/nonexistent/x", OldString: []byte("a"), NewString: []byte("b")})
+	r := lastEditReply(t, s)
+	require.False(t, r.OK)
+	require.Equal(t, "not_found", r.Error)
+}

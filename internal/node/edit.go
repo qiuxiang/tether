@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -111,9 +112,63 @@ func atomicWrite(path string, data []byte, overwrite, createDirs bool) (int64, s
 	return int64(len(data)), hex.EncodeToString(sum[:]), nil
 }
 
-// handleEdit is a placeholder implemented in Task 4.
 func (h *EditHandler) handleEdit(send Sender, m *protocol.EditFileReq) {
-	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not_implemented"})
+	path, err := expandPath(m.Path)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: classifyErr(err)})
+		return
+	}
+	if info.IsDir() {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "is_directory"})
+		return
+	}
+	if info.Size() > editMaxBytes {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "too_large"})
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: classifyErr(err)})
+		return
+	}
+
+	count := bytes.Count(data, m.OldString)
+	if count == 0 {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not_found"})
+		return
+	}
+	if count > 1 && !m.ReplaceAll {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "not_unique"})
+		return
+	}
+
+	var out []byte
+	var replaced int
+	if m.ReplaceAll {
+		out = bytes.ReplaceAll(data, m.OldString, m.NewString)
+		replaced = count
+	} else {
+		out = bytes.Replace(data, m.OldString, m.NewString, 1)
+		replaced = 1
+	}
+	if int64(len(out)) > editMaxBytes {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "too_large"})
+		return
+	}
+	_, sum, werr := atomicWrite(path, out, true, false)
+	if werr != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: werr.Error()})
+		return
+	}
+	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
+		"replacements": replaced,
+		"sha256":       sum,
+	}})
 }
 
 func (h *EditHandler) handleRead(send Sender, m *protocol.ReadFileReq) {
