@@ -134,6 +134,12 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 		if err := cs.server.relay.Start(cs, m); err != nil {
 			cs.sendErrorReply(m.MsgID, err)
 		}
+	case *protocol.ReadFileReq:
+		cs.routeOneShot(m.MsgID, m.Target, raw)
+	case *protocol.WriteFileReq:
+		cs.routeOneShot(m.MsgID, m.Target, raw)
+	case *protocol.EditFileReq:
+		cs.routeOneShot(m.MsgID, m.Target, raw)
 	default:
 		// Unknown / not-routable from client: drop.
 	}
