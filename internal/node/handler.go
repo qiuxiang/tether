@@ -13,6 +13,7 @@ type ProcessHandler struct {
 	mu             sync.Mutex
 	attachSubs     map[string]attachRec
 	fileHandler    *FileHandler
+	editHandler    *EditHandler
 	forwardHandler *ForwardHandler
 }
 
@@ -22,6 +23,7 @@ func NewProcessHandler(logDir string, cap int) *ProcessHandler {
 		logDir:         logDir,
 		attachSubs:     make(map[string]attachRec),
 		fileHandler:    NewFileHandler(),
+		editHandler:    NewEditHandler(),
 		forwardHandler: NewForwardHandler(),
 	}
 }
@@ -45,6 +47,8 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 	case *protocol.FilePutOpen, *protocol.FileChunk, *protocol.FileAbort,
 		*protocol.FileGetOpen, *protocol.FileLocalCopy:
 		h.fileHandler.Handle(send, msg)
+	case *protocol.ReadFileReq, *protocol.WriteFileReq, *protocol.EditFileReq:
+		h.editHandler.Handle(send, msg)
 	case *protocol.ForwardListen:
 		h.forwardHandler.Listen(send, m)
 	case *protocol.ForwardUnlisten:
