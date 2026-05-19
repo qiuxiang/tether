@@ -658,6 +658,79 @@ func (t *replyTapHandler) Handle(ctx context.Context, send node.Sender, msg prot
 	t.inner.Handle(ctx, send, msg)
 }
 
+func TestE2ERemoteFileEdit(t *testing.T) {
+	s := hub.NewServer(hub.Options{Token: "secret"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
+	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
+	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
+	go nc.Run(ctx)
+	require.Eventually(t, func() bool {
+		_, ok := s.Registry().Get("e2e-host")
+		return ok
+	}, 2*time.Second, 20*time.Millisecond)
+
+	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
+	c := client.NewConn(client.Config{HubURL: cliURL, Token: "secret"})
+	go c.Run(ctx)
+	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
+	require.NoError(t, c.WaitReady(cctx))
+	ccancel()
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "file.txt")
+
+	// 1. write_file
+	id := client.NewMsgID()
+	ch := c.RPC().Register(id)
+	require.NoError(t, c.Send(&protocol.WriteFileReq{
+		MsgID: id, Target: "e2e-host", Path: target,
+		Content: []byte("alpha\nbeta\ngamma\n"),
+	}))
+	r := <-ch
+	c.RPC().Unregister(id)
+	require.True(t, r.OK, "write err: %s", r.Error)
+
+	// 2. read_file
+	id = client.NewMsgID()
+	ch = c.RPC().Register(id)
+	require.NoError(t, c.Send(&protocol.ReadFileReq{MsgID: id, Target: "e2e-host", Path: target}))
+	r = <-ch
+	c.RPC().Unregister(id)
+	require.True(t, r.OK, "read err: %s", r.Error)
+	switch v := r.Data["total_lines"].(type) {
+	case int:
+		require.Equal(t, 3, v)
+	case int64:
+		require.Equal(t, int64(3), v)
+	case uint64:
+		require.Equal(t, uint64(3), v)
+	default:
+		t.Fatalf("unexpected total_lines type: %T = %v", v, v)
+	}
+
+	// 3. edit_file
+	id = client.NewMsgID()
+	ch = c.RPC().Register(id)
+	require.NoError(t, c.Send(&protocol.EditFileReq{
+		MsgID: id, Target: "e2e-host", Path: target,
+		OldString: []byte("beta"), NewString: []byte("BETA"),
+	}))
+	r = <-ch
+	c.RPC().Unregister(id)
+	require.True(t, r.OK, "edit err: %s", r.Error)
+
+	// 4. Verify on disk
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "alpha\nBETA\ngamma\n", string(got))
+}
+
 func echoLoop(ln net.Listener) {
 	for {
 		c, err := ln.Accept()
