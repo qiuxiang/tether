@@ -60,21 +60,29 @@ func TestStartPTY_BusReceivesOutputAndClosesOnExit(t *testing.T) {
 	sub := p.bus.Subscribe(0)
 	var got []byte
 	deadline := time.After(2 * time.Second)
+loop:
 	for {
 		select {
-		case chunk, ok := <-sub.Ch():
-			if !ok {
-				if !bytes.Contains(got, []byte("hello")) {
-					t.Fatalf("bus output missing 'hello': %q", got)
-				}
-				<-exited
-				return
-			}
+		case chunk := <-sub.Ch():
 			got = append(got, chunk...)
+		case <-sub.Done():
+			// Drain whatever was buffered after the bus closed.
+			for {
+				select {
+				case chunk := <-sub.Ch():
+					got = append(got, chunk...)
+				default:
+					break loop
+				}
+			}
 		case <-deadline:
 			t.Fatalf("timeout, got=%q", got)
 		}
 	}
+	if !bytes.Contains(got, []byte("hello")) {
+		t.Fatalf("bus output missing 'hello': %q", got)
+	}
+	<-exited
 }
 
 func TestExecPTYTtyDetected(t *testing.T) {

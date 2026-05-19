@@ -142,12 +142,30 @@ func (h *ProcessHandler) handleAttach(send Sender, m *protocol.Attach) {
 	if offset < 0 {
 		offset = 0
 	}
-	for chunk := range sub.Ch() {
-		send.Send(&protocol.ProcessOutput{MsgID: m.MsgID, Offset: offset, Data: chunk})
-		offset += int64(len(chunk))
+loop:
+	for {
+		select {
+		case chunk := <-sub.Ch():
+			send.Send(&protocol.ProcessOutput{MsgID: m.MsgID, Offset: offset, Data: chunk})
+			offset += int64(len(chunk))
+		case <-sub.Done():
+			// Drain any chunks already buffered so output is not truncated when
+			// the bus closes between two pty writes.
+			for {
+				select {
+				case chunk := <-sub.Ch():
+					send.Send(&protocol.ProcessOutput{MsgID: m.MsgID, Offset: offset, Data: chunk})
+					offset += int64(len(chunk))
+				default:
+					break loop
+				}
+			}
+		}
 	}
-	// Bus closed → process exited. Send terminal ProcessExit so the client's
-	// stream is unblocked.
+	// Done signaled → either the bus closed (process exit) or this Attach was
+	// detached. Send terminal ProcessExit so the client's stream is unblocked
+	// either way; for Detach this is harmless since the client has already
+	// stopped reading.
 	code := 0
 	p.mu.Lock()
 	if p.ExitCode != nil {

@@ -47,20 +47,25 @@ func TestByteBus_FromOffsetSkipsBacklog(t *testing.T) {
 	}
 }
 
-func TestByteBus_CloseEndsSubscribers(t *testing.T) {
+func TestByteBus_CloseSignalsDone(t *testing.T) {
 	b := newByteBus()
 	sub := b.Subscribe(0)
 	b.Close()
-	deadline := time.After(200 * time.Millisecond)
-	for {
-		select {
-		case _, ok := <-sub.Ch():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("subscriber channel not closed after bus close")
-		}
+	select {
+	case <-sub.Done():
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("sub.Done() not signaled after bus close")
+	}
+}
+
+func TestByteBus_UnsubscribeSignalsDone(t *testing.T) {
+	b := newByteBus()
+	sub := b.Subscribe(0)
+	b.Unsubscribe(sub)
+	select {
+	case <-sub.Done():
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("sub.Done() not signaled after Unsubscribe")
 	}
 }
 
@@ -71,7 +76,12 @@ func TestByteBus_ConcurrentWriteAndUnsubscribe(t *testing.T) {
 		subs[i] = b.Subscribe(0)
 		// Drain in the background so Writes don't block forever.
 		go func(s *busSub) {
-			for range s.Ch() {
+			for {
+				select {
+				case <-s.Ch():
+				case <-s.Done():
+					return
+				}
 			}
 		}(subs[i])
 	}
@@ -95,11 +105,10 @@ func drain(t *testing.T, sub *busSub, n int, timeout time.Duration) []byte {
 	var out []byte
 	for len(out) < n {
 		select {
-		case chunk, ok := <-sub.Ch():
-			if !ok {
-				return out
-			}
+		case chunk := <-sub.Ch():
 			out = append(out, chunk...)
+		case <-sub.Done():
+			return out
 		case <-deadline:
 			return out
 		}

@@ -7,8 +7,11 @@ import "sync"
 // can ask for the existing backlog starting from a given offset; subsequent
 // writes are delivered live.
 //
-// Bus.Close() ends every subscriber's channel; further Writes are no-ops.
-// Unsubscribe removes a single subscriber without closing the bus.
+// Cancellation signal is sub.done — never the data channel. Consumers must
+// select on both sub.Ch() and sub.Done(); a closed sub.done means the bus
+// is finished (process exit) or this sub was cancelled (Unsubscribe). The
+// data channel ch is intentionally never closed so a concurrent Write
+// cannot panic with send-on-closed-channel.
 //
 // Note: buf is never truncated — memory grows with total process output.
 type byteBus struct {
@@ -23,7 +26,8 @@ type busSub struct {
 	done chan struct{}
 }
 
-func (s *busSub) Ch() <-chan []byte { return s.ch }
+func (s *busSub) Ch() <-chan []byte     { return s.ch }
+func (s *busSub) Done() <-chan struct{} { return s.done }
 
 func newByteBus() *byteBus {
 	return &byteBus{subs: make(map[*busSub]struct{})}
@@ -82,7 +86,6 @@ func (b *byteBus) Subscribe(fromOffset int64) *busSub {
 	}
 	if b.closed {
 		close(sub.done)
-		close(sub.ch)
 		b.mu.Unlock()
 		return sub
 	}
@@ -91,18 +94,20 @@ func (b *byteBus) Subscribe(fromOffset int64) *busSub {
 	return sub
 }
 
-// Unsubscribe removes sub and closes its channel. Safe to call once.
+// Unsubscribe signals cancellation on sub.done. The data channel is not
+// closed (a concurrent Write may still be mid-send). Safe to call multiple
+// times — the second call is a no-op.
 func (b *byteBus) Unsubscribe(sub *busSub) {
 	b.mu.Lock()
 	if _, ok := b.subs[sub]; ok {
 		delete(b.subs, sub)
 		close(sub.done)
-		close(sub.ch)
 	}
 	b.mu.Unlock()
 }
 
-// Close ends the bus: subscribers' channels are closed, future Writes drop.
+// Close ends the bus: every subscriber's done is closed, future Writes drop.
+// Data channels are deliberately not closed.
 func (b *byteBus) Close() {
 	b.mu.Lock()
 	if b.closed {
@@ -112,7 +117,6 @@ func (b *byteBus) Close() {
 	b.closed = true
 	for s := range b.subs {
 		close(s.done)
-		close(s.ch)
 	}
 	b.subs = nil
 	b.mu.Unlock()
