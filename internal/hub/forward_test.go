@@ -52,8 +52,11 @@ func TestForwardTableEvictByPeer(t *testing.T) {
 	ft.OpenStream("s1", c, n1)
 	ft.OpenStream("s2", c, n2)
 	evicted := ft.EvictStreamsForNode(n1)
-	if len(evicted) != 1 || evicted[0] != "s1" {
-		t.Fatalf("got %v", evicted)
+	if len(evicted) != 1 {
+		t.Fatalf("expected 1 evicted, got %v", evicted)
+	}
+	if opp, ok := evicted["s1"]; !ok || opp != c {
+		t.Fatalf("expected s1→c, got %v", evicted)
 	}
 	if _, _, ok := ft.LookupStream("s1"); ok {
 		t.Fatalf("s1 should be gone")

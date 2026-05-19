@@ -201,6 +201,20 @@ func (h *ForwardHandler) resendRemote(send Sender, r forward.Rule) {
 // Listen opens a TCP listener on ListenAddr. On success it replies with
 // Reply{OK:true, Data:{"listen_addr": <actual addr>}} and starts an accept loop.
 func (h *ForwardHandler) Listen(send Sender, m *protocol.ForwardListen) {
+	h.mu.Lock()
+	if old, ok := h.listeners[m.ForwardID]; ok {
+		// A listener for this forward_id already exists (e.g. duplicate
+		// ForwardListen from OnDeviceOnline, or stale from a prior session).
+		// Reply with the existing addr — idempotent and safe in both cases.
+		addr := old.Addr().String()
+		h.mu.Unlock()
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
+			"listen_addr": addr,
+		}})
+		return
+	}
+	h.mu.Unlock()
+
 	ln, err := net.Listen("tcp", m.ListenAddr)
 	if err != nil {
 		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
@@ -275,6 +289,7 @@ func (h *ForwardHandler) Dial(send Sender, m *protocol.ForwardDial) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: "dial: " + err.Error()})
+		send.Send(&protocol.ForwardClose{StreamID: m.StreamID, Half: "both"})
 		return
 	}
 	h.mu.Lock()
@@ -323,6 +338,7 @@ func (h *ForwardHandler) Data(send Sender, m *protocol.ForwardData) {
 		h.mu.Lock()
 		if cur, still := h.streams[m.StreamID]; still && cur == fs {
 			delete(h.streams, m.StreamID)
+			delete(h.streamMsg, m.StreamID)
 		}
 		h.mu.Unlock()
 		fs.conn.Close()
@@ -408,6 +424,7 @@ func (h *ForwardHandler) readPump(send Sender, sid string, conn net.Conn) {
 			fs, ok := h.streams[sid]
 			if ok && fs.conn == conn {
 				delete(h.streams, sid)
+				delete(h.streamMsg, sid)
 			}
 			h.mu.Unlock()
 

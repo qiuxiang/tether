@@ -42,15 +42,18 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		for _, sid := range s.forwards.EvictStreamsForNode(sess) {
-			cl := &protocol.ForwardClose{StreamID: sid, Half: "both"}
-			raw, _ := protocol.Encode(cl)
-			for _, client := range s.clients.List() {
-				if client.Conn != nil {
-					_ = client.Conn.SendRaw(raw)
+		notifyClose := func(streams map[string]PeerConn) {
+			for sid, peer := range streams {
+				if peer == nil {
+					continue
 				}
+				cl := &protocol.ForwardClose{StreamID: sid, Half: "both"}
+				raw, _ := protocol.Encode(cl)
+				_ = peer.SendRaw(raw)
 			}
 		}
+		notifyClose(s.forwards.EvictStreamsForNode(sess))
+		notifyClose(s.forwards.EvictStreamsForClient(sess))
 		c.Close(websocket.StatusNormalClosure, "")
 	}()
 
@@ -187,7 +190,7 @@ func (s *deviceSession) run(ctx context.Context) {
 				continue
 			}
 			s.server.forwards.OpenStream(v.StreamID, owner, s)
-			s.server.router.Register(v.MsgID, owner, false)
+			s.server.router.Register(v.MsgID, s, false)
 			_ = owner.SendRaw(raw)
 			continue
 		case *protocol.ForwardData:

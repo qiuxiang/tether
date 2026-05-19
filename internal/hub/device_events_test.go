@@ -150,14 +150,13 @@ func TestNodeDisconnectEvictsStreams(t *testing.T) {
 	s.forwards.OpenStream("s2", client, sess)
 
 	// Simulate the eviction logic from the defer in handleDevice.
-	for _, sid := range s.forwards.EvictStreamsForNode(sess) {
+	for sid, peer := range s.forwards.EvictStreamsForNode(sess) {
+		if peer == nil {
+			continue
+		}
 		cl := &protocol.ForwardClose{StreamID: sid, Half: "both"}
 		raw, _ := protocol.Encode(cl)
-		for _, c := range s.clients.List() {
-			if c.Conn != nil {
-				_ = c.Conn.SendRaw(raw)
-			}
-		}
+		_ = peer.SendRaw(raw)
 	}
 
 	if len(client.sent) != 2 {

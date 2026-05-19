@@ -82,14 +82,14 @@ func (t *ForwardTable) CloseStream(streamID string) {
 }
 
 // EvictStreamsForNode removes all streams whose node peer matches n and
-// returns the removed stream IDs.
-func (t *ForwardTable) EvictStreamsForNode(n PeerConn) []string {
+// returns a map of stream_id → opposite peer (the Client side).
+func (t *ForwardTable) EvictStreamsForNode(n PeerConn) map[string]PeerConn {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var out []string
+	out := map[string]PeerConn{}
 	for sid, r := range t.streams {
 		if r.Node == n {
-			out = append(out, sid)
+			out[sid] = r.Client
 			delete(t.streams, sid)
 		}
 	}
@@ -97,14 +97,14 @@ func (t *ForwardTable) EvictStreamsForNode(n PeerConn) []string {
 }
 
 // EvictStreamsForClient removes all streams whose client peer matches c and
-// returns the removed stream IDs.
-func (t *ForwardTable) EvictStreamsForClient(c PeerConn) []string {
+// returns a map of stream_id → opposite peer (the Node side).
+func (t *ForwardTable) EvictStreamsForClient(c PeerConn) map[string]PeerConn {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var out []string
+	out := map[string]PeerConn{}
 	for sid, r := range t.streams {
 		if r.Client == c {
-			out = append(out, sid)
+			out[sid] = r.Node
 			delete(t.streams, sid)
 		}
 	}
