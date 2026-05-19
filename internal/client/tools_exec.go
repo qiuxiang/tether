@@ -42,13 +42,13 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 
 	m.AddTool(
 		mcp.NewTool("exec",
-			mcp.WithDescription("Run a one-shot command on a device. Streams output, returns final stdout/stderr/exit_code."),
+			mcp.WithDescription("Run a command on a device, wait for it to exit, return merged pty output. If the MCP call is cancelled while the command is still running, returns success with timed_out=true and a process_id so the caller can re-attach or inspect via list_processes/capture_screen/kill_process. The command keeps running on the device in that case."),
 			mcp.WithString("device", mcp.Required()),
 			mcp.WithString("cmd", mcp.Required(), mcp.Description("Shell command (passed to sh -c)")),
 			mcp.WithString("cwd"),
 			mcp.WithObject("env"),
 			mcp.WithString("stdin"),
-			mcp.WithNumber("timeout"),
+			mcp.WithString("description", mcp.Description("Free-form annotation so you can find this command later via list_processes when timed out.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			args := req.GetArguments()
@@ -56,48 +56,75 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			cmd, _ := args["cmd"].(string)
 			cwd, _ := args["cwd"].(string)
 			stdin, _ := args["stdin"].(string)
-			timeout := 60 * time.Second
-			if t, ok := args["timeout"].(float64); ok {
-				timeout = time.Duration(t) * time.Second
-			}
+			desc, _ := args["description"].(string)
 			envMap := extractStringMap(args["env"])
 
-			id := NewMsgID()
-			ch := c.rpc.RegisterStream(id)
-			defer c.rpc.Unregister(id)
-			msg := &protocol.Exec{
-				MsgID: id, Target: device,
+			pid := NewMsgID()
+
+			// 1) Start.
+			startID := NewMsgID()
+			startCh := c.rpc.Register(startID)
+			if err := c.Send(&protocol.Start{
+				MsgID: startID, Target: device, ProcessID: pid,
 				Cmd: []string{"sh", "-c", cmd}, Cwd: cwd, Env: envMap,
-				Stdin: []byte(stdin), TimeoutMs: timeout.Milliseconds(),
-			}
-			if err := c.Send(msg); err != nil {
+				Description: desc,
+			}); err != nil {
+				c.rpc.Unregister(startID)
 				return mcp.NewToolResultError(err.Error()), nil
 			}
+			select {
+			case reply := <-startCh:
+				c.rpc.Unregister(startID)
+				if !reply.OK {
+					return mcp.NewToolResultError(reply.Error), nil
+				}
+			case <-ctx.Done():
+				c.rpc.Unregister(startID)
+				return mcp.NewToolResultError(ctx.Err().Error()), nil
+			}
 
-			var stdoutB, stderrB []byte
-			deadline := time.After(timeout + 5*time.Second)
+			// 2) Optional initial stdin (fire-and-forget; node accepts after Start).
+			if len(stdin) > 0 {
+				_ = c.Send(&protocol.Stdin{Target: device, ProcessID: pid, Data: []byte(stdin)})
+			}
+
+			// 3) Attach. Reply channel for OK/error signal, stream channel for output.
+			attachID := NewMsgID()
+			attachReplyCh := c.rpc.Register(attachID)
+			ch := c.rpc.RegisterStream(attachID)
+			defer c.rpc.Unregister(attachID)
+			if err := c.Send(&protocol.Attach{MsgID: attachID, Target: device, ProcessID: pid}); err != nil {
+				return resultExec(nil, 0, pid, false, err.Error()), nil
+			}
+
+			// Wait for the initial Attach reply.
+			select {
+			case reply := <-attachReplyCh:
+				if !reply.OK {
+					return mcp.NewToolResultError(reply.Error), nil
+				}
+			case <-ctx.Done():
+				_ = c.Send(&protocol.Detach{Target: device, ProcessID: pid})
+				return resultExec(nil, 0, pid, true, ""), nil
+			}
+
+			var output []byte
 			for {
 				select {
-				case m, ok := <-ch:
+				case msg, ok := <-ch:
 					if !ok {
-						return resultExec(stdoutB, stderrB, 0, false), nil
+						// Stream closed without ProcessExit — treat as ended.
+						return resultExec(output, 0, pid, false, ""), nil
 					}
-					switch v := m.(type) {
-					case *protocol.ExecOutput:
-						if v.Stream == "stderr" {
-							stderrB = append(stderrB, v.Data...)
-						} else {
-							stdoutB = append(stdoutB, v.Data...)
-						}
-					case *protocol.ExecExit:
-						return resultExec(stdoutB, stderrB, v.Code, false), nil
+					switch v := msg.(type) {
+					case *protocol.ProcessOutput:
+						output = append(output, v.Data...)
+					case *protocol.ProcessExit:
+						return resultExec(output, v.Code, pid, false, ""), nil
 					}
-				case <-deadline:
-					_ = c.Send(&protocol.ExecCancel{MsgID: id, Target: device})
-					return resultExec(stdoutB, stderrB, -1, true), nil
 				case <-ctx.Done():
-					_ = c.Send(&protocol.ExecCancel{MsgID: id, Target: device})
-					return mcp.NewToolResultError(errors.New("cancelled").Error()), nil
+					_ = c.Send(&protocol.Detach{Target: device, ProcessID: pid})
+					return resultExec(output, 0, pid, true, ""), nil
 				}
 			}
 		},
@@ -111,14 +138,14 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			mcp.WithString("cmd", mcp.Required()),
 			mcp.WithString("cwd"),
 			mcp.WithObject("env"),
-			mcp.WithString("name"),
+			mcp.WithString("description", mcp.Description("Free-form annotation for later identification via list_processes.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			args := req.GetArguments()
 			device, _ := args["device"].(string)
 			cmdStr, _ := args["cmd"].(string)
 			cwd, _ := args["cwd"].(string)
-			name, _ := args["name"].(string)
+			desc, _ := args["description"].(string)
 			envMap := extractStringMap(args["env"])
 			pid := NewMsgID()
 			id := NewMsgID()
@@ -127,7 +154,7 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			if err := c.Send(&protocol.Start{
 				MsgID: id, Target: device, ProcessID: pid,
 				Cmd: []string{"sh", "-c", cmdStr}, Cwd: cwd, Env: envMap,
-				Name: name,
+				Description: desc,
 			}); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -138,8 +165,6 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 				}
 				b, _ := json.Marshal(map[string]any{"process_id": pid})
 				return mcp.NewToolResultText(string(b)), nil
-			case <-time.After(defaultRPCTimeout):
-				return mcp.NewToolResultError("timeout"), nil
 			case <-ctx.Done():
 				return mcp.NewToolResultError(ctx.Err().Error()), nil
 			}
@@ -321,11 +346,17 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 	)
 }
 
-func resultExec(stdoutB, stderrB []byte, code int, timedOut bool) *mcp.CallToolResult {
-	b, _ := json.Marshal(map[string]any{
-		"stdout": string(stdoutB), "stderr": string(stderrB),
-		"exit_code": code, "timed_out": timedOut,
-	})
+func resultExec(output []byte, code int, processID string, timedOut bool, errStr string) *mcp.CallToolResult {
+	payload := map[string]any{
+		"output":     string(output),
+		"exit_code":  code,
+		"process_id": processID,
+		"timed_out":  timedOut,
+	}
+	if errStr != "" {
+		payload["error"] = errStr
+	}
+	b, _ := json.Marshal(payload)
 	return mcp.NewToolResultText(string(b))
 }
 

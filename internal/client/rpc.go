@@ -69,14 +69,14 @@ func (r *RPC) Deliver(msg protocol.Message) {
 			default:
 			}
 		}
-	case *protocol.ExecOutput:
+	case *protocol.ProcessOutput:
 		r.mu.Lock()
 		ch, ok := r.streams[m.MsgID]
 		r.mu.Unlock()
 		if ok {
 			ch <- m
 		}
-	case *protocol.ExecExit:
+	case *protocol.ProcessExit:
 		r.mu.Lock()
 		ch, ok := r.streams[m.MsgID]
 		r.mu.Unlock()
