@@ -8,9 +8,9 @@ import (
 )
 
 // WSReadLimit is the per-message read limit applied to every websocket.Conn.
-// File-transfer chunks are 256 KiB; 4 MiB gives comfortable headroom for CBOR
-// framing overhead while staying well below any network-layer limit.
-const WSReadLimit int64 = 4 << 20 // 4 MiB
+// File-transfer chunks are 256 KiB; the cap must also accommodate the 10 MiB
+// editMaxBytes for write_file/edit_file payloads plus CBOR framing overhead.
+const WSReadLimit int64 = 16 << 20 // 16 MiB
 
 // decMode forces untyped nested maps to decode as map[string]any so the result
 // round-trips through encoding/json. Without this, fxamacker defaults to
