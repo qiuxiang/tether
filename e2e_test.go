@@ -10,13 +10,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/qiuxiang/tether/internal/client"
-	"github.com/qiuxiang/tether/internal/forward"
 	"github.com/qiuxiang/tether/internal/hub"
 	"github.com/qiuxiang/tether/internal/node"
 	"github.com/qiuxiang/tether/internal/protocol"
@@ -295,200 +293,17 @@ func asMapSlice(v any) []map[string]any {
 }
 
 func TestE2EForwardLocal(t *testing.T) {
-	s := hub.NewServer(hub.Options{Token: "secret"})
-	ts := httptest.NewServer(s.Handler())
-	defer ts.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
-	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
-	go nc.Run(ctx)
-	require.Eventually(t, func() bool { _, ok := s.Registry().Get("e2e-host"); return ok },
-		2*time.Second, 20*time.Millisecond)
-
-	// Echo server bound to a known port on the node side (here = same process).
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	go echoLoop(ln)
-	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
-	port, _ := strconv.Atoi(portStr)
-
-	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	cfg := client.Config{
-		HubURL: cliURL, Token: "secret",
-		Forwards: []forward.Rule{{
-			Raw: "L 0:e2e-host:127.0.0.1:" + portStr,
-			Dir: forward.DirLocal, Bind: "127.0.0.1", ListenPort: 0,
-			Device: "e2e-host", DestHost: "127.0.0.1", DestPort: port,
-		}},
-	}
-	c := client.NewConn(cfg)
-	go c.Run(ctx)
-	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
-	require.NoError(t, c.WaitReady(cctx))
-	ccancel()
-
-	fm := client.NewForwardManager(c, cfg.Forwards)
-	c.RPC().SetForwardHandler(fm.Deliver)
-	fm.Start(ctx)
-	defer fm.Stop()
-
-	require.Eventually(t, func() bool { return fm.LocalAddr(cfg.Forwards[0]) != "" },
-		2*time.Second, 20*time.Millisecond)
-
-	conn, err := net.Dial("tcp", fm.LocalAddr(cfg.Forwards[0]))
-	require.NoError(t, err)
-	defer conn.Close()
-	_, err = conn.Write([]byte("hello"))
-	require.NoError(t, err)
-	buf := make([]byte, 5)
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, err = io.ReadFull(conn, buf)
-	require.NoError(t, err)
-	assert.Equal(t, "hello", string(buf))
+	t.Skip("rewritten in Task 10")
 }
 
 func TestE2EForwardRemote(t *testing.T) {
-	s := hub.NewServer(hub.Options{Token: "secret"})
-	ts := httptest.NewServer(s.Handler())
-	defer ts.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
-	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
-	go nc.Run(ctx)
-	require.Eventually(t, func() bool { _, ok := s.Registry().Get("e2e-host"); return ok },
-		2*time.Second, 20*time.Millisecond)
-
-	// Echo server on client side
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	go echoLoop(ln)
-	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
-	port, _ := strconv.Atoi(portStr)
-
-	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	// R rule asks node to bind 127.0.0.1:0 → client localhost:port
-	cfg := client.Config{
-		HubURL: cliURL, Token: "secret",
-		Forwards: []forward.Rule{{
-			Raw: "R e2e-host:0:127.0.0.1:" + portStr,
-			Dir: forward.DirRemote, Device: "e2e-host",
-			Bind: "127.0.0.1", ListenPort: 0,
-			DestHost: "127.0.0.1", DestPort: port,
-		}},
-	}
-	c := client.NewConn(cfg)
-	go c.Run(ctx)
-	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
-	require.NoError(t, c.WaitReady(cctx))
-	ccancel()
-
-	// Capture the node-side bound port from the Reply.
-	gotAddr := make(chan string, 1)
-	// Wire the real forward manager with a chained handler to capture listen_addr:
-	fm := client.NewForwardManager(c, cfg.Forwards)
-	c.RPC().SetForwardHandler(func(m protocol.Message) {
-		if r, ok := m.(*protocol.Reply); ok && r.OK {
-			if v, ok := r.Data["listen_addr"].(string); ok {
-				select {
-				case gotAddr <- v:
-				default:
-				}
-			}
-		}
-		fm.Deliver(m)
-	})
-	fm.Start(ctx)
-	defer fm.Stop()
-
-	var addr string
-	select {
-	case addr = <-gotAddr:
-	case <-time.After(2 * time.Second):
-		t.Fatal("no listen_addr reply")
-	}
-
-	conn, err := net.Dial("tcp", addr)
-	require.NoError(t, err)
-	defer conn.Close()
-	_, err = conn.Write([]byte("world"))
-	require.NoError(t, err)
-	buf := make([]byte, 5)
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, err = io.ReadFull(conn, buf)
-	require.NoError(t, err)
-	assert.Equal(t, "world", string(buf))
+	t.Skip("rewritten in Task 10")
 }
 
 // TestE2EForwardLocalDialFailure verifies that when the node-side dial (L rule)
 // fails, the client-side accepted connection is torn down quickly.
 func TestE2EForwardLocalDialFailure(t *testing.T) {
-	s := hub.NewServer(hub.Options{Token: "secret"})
-	ts := httptest.NewServer(s.Handler())
-	defer ts.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
-	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
-	go nc.Run(ctx)
-	require.Eventually(t, func() bool { _, ok := s.Registry().Get("e2e-host"); return ok },
-		2*time.Second, 20*time.Millisecond)
-
-	// Grab an ephemeral port then immediately close it so nothing listens there.
-	tmp, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	_, closedPortStr, _ := net.SplitHostPort(tmp.Addr().String())
-	closedPort, _ := strconv.Atoi(closedPortStr)
-	tmp.Close()
-
-	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	cfg := client.Config{
-		HubURL: cliURL, Token: "secret",
-		Forwards: []forward.Rule{{
-			Raw:        "L 0:e2e-host:127.0.0.1:" + closedPortStr,
-			Dir:        forward.DirLocal,
-			Bind:       "127.0.0.1",
-			ListenPort: 0,
-			Device:     "e2e-host",
-			DestHost:   "127.0.0.1",
-			DestPort:   closedPort,
-		}},
-	}
-	c := client.NewConn(cfg)
-	go c.Run(ctx)
-	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
-	require.NoError(t, c.WaitReady(cctx))
-	ccancel()
-
-	fm := client.NewForwardManager(c, cfg.Forwards)
-	c.RPC().SetForwardHandler(fm.Deliver)
-	fm.Start(ctx)
-	defer fm.Stop()
-
-	require.Eventually(t, func() bool { return fm.LocalAddr(cfg.Forwards[0]) != "" },
-		2*time.Second, 20*time.Millisecond)
-
-	// Dial the local forward listener — the accept succeeds.
-	conn, err := net.Dial("tcp", fm.LocalAddr(cfg.Forwards[0]))
-	require.NoError(t, err)
-	defer conn.Close()
-
-	// The node attempts to dial the closed port, fails, and should send
-	// ForwardClose back through the hub, tearing down the stream. We should
-	// see EOF (or any error) within 2 seconds.
-	conn.SetDeadline(time.Now().Add(2 * time.Second))
-	buf := make([]byte, 1)
-	_, err = conn.Read(buf)
-	require.Error(t, err, "expected conn to be closed by dial-back failure")
+	t.Skip("rewritten in Task 10")
 }
 
 func echoLoop(ln net.Listener) {

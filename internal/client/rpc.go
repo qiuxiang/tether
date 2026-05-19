@@ -12,16 +12,6 @@ type RPC struct {
 	mu      sync.Mutex
 	replies map[string]chan *protocol.Reply
 	streams map[string]chan protocol.Message
-	forward func(protocol.Message)
-}
-
-// SetForwardHandler registers a callback that receives forward-related frames
-// (ForwardDial, ForwardData, ForwardClose, Event) and Reply frames that have
-// no registered reply channel.
-func (r *RPC) SetForwardHandler(f func(protocol.Message)) {
-	r.mu.Lock()
-	r.forward = f
-	r.mu.Unlock()
 }
 
 func NewRPC() *RPC {
@@ -69,28 +59,15 @@ func (r *RPC) Unregister(msgID string) {
 
 func (r *RPC) Deliver(msg protocol.Message) {
 	switch m := msg.(type) {
-	case *protocol.ForwardDial, *protocol.ForwardData, *protocol.ForwardClose, *protocol.Event:
-		r.mu.Lock()
-		f := r.forward
-		r.mu.Unlock()
-		if f != nil {
-			f(m)
-		}
 	case *protocol.Reply:
 		r.mu.Lock()
 		ch, ok := r.replies[m.MsgID]
-		f := r.forward
 		r.mu.Unlock()
 		if ok {
 			select {
 			case ch <- m:
 			default:
 			}
-			return
-		}
-		// No registered reply channel — fan to forward handler (e.g. dial-back replies).
-		if f != nil {
-			f(m)
 		}
 	case *protocol.ExecOutput:
 		r.mu.Lock()

@@ -34,11 +34,6 @@ func MCP(args []string, stderr io.Writer) int {
 		return 1
 	}
 
-	fm := client.NewForwardManager(c, cfg.Forwards)
-	c.RPC().SetForwardHandler(fm.Deliver)
-	fm.Start(ctx)
-	defer fm.Stop()
-
 	s := client.NewMCPServer(c)
 	if err := s.Serve(ctx, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(stderr, err)
