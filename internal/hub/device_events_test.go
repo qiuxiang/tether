@@ -127,6 +127,19 @@ func TestDeviceOnlineBroadcastToNodes(t *testing.T) {
 	}
 }
 
+func TestNodeOwnedListenerLookup(t *testing.T) {
+	s := NewServer(Options{Token: "x"})
+	origin := &fakePeer{}
+	s.Forwards().AddListener("f1", origin)
+	got, ok := s.Forwards().LookupListener("f1")
+	if !ok || got != origin {
+		t.Fatalf("listener not retrievable: %v %v", got, ok)
+	}
+	if got := s.Forwards().RemoveListenersForClient(origin); len(got) != 1 || got[0] != "f1" {
+		t.Fatalf("RemoveListenersForClient = %v", got)
+	}
+}
+
 func TestNodeDisconnectEvictsStreams(t *testing.T) {
 	s := NewServer(Options{Token: "x"})
 	client := &fakePeer{}

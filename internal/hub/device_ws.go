@@ -33,6 +33,15 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		log.Printf("device disconnected: hostname=%s", sess.device.Hostname)
 		s.registry.Unregister(sess.device.Hostname)
 		s.broadcastDeviceEvent("device_offline", sess.device.Hostname)
+		for _, fid := range s.forwards.RemoveListenersForClient(sess) {
+			unl := &protocol.ForwardUnlisten{ForwardID: fid}
+			raw, _ := protocol.Encode(unl)
+			for _, d := range s.registry.List() {
+				if d.Conn != nil && d.Conn != sess {
+					_ = d.Conn.SendRaw(raw)
+				}
+			}
+		}
 		for _, sid := range s.forwards.EvictStreamsForNode(sess) {
 			cl := &protocol.ForwardClose{StreamID: sid, Half: "both"}
 			raw, _ := protocol.Encode(cl)
@@ -134,14 +143,52 @@ func (s *deviceSession) run(ctx context.Context) {
 		}
 		s.device.LastSeen = time.Now()
 		switch v := msg.(type) {
+		case *protocol.ForwardListen:
+			d, ok := s.server.registry.Get(v.Target)
+			if !ok || d.Conn == nil {
+				_ = s.SendRaw(replyErrBytes(v.MsgID, "device_offline: "+v.Target))
+				continue
+			}
+			s.server.forwards.AddListener(v.ForwardID, s)
+			s.server.router.Register(v.MsgID, s, false)
+			if err := d.Conn.SendRaw(raw); err != nil {
+				s.server.forwards.RemoveListener(v.ForwardID)
+				s.server.router.Unregister(v.MsgID)
+				_ = s.SendRaw(replyErrBytes(v.MsgID, err.Error()))
+			}
+			continue
+		case *protocol.ForwardUnlisten:
+			s.server.forwards.RemoveListener(v.ForwardID)
+			if d, ok := s.server.registry.Get(v.Target); ok && d.Conn != nil {
+				_ = d.Conn.SendRaw(raw)
+			}
+			continue
 		case *protocol.ForwardDial:
-			client, ok := s.server.forwards.LookupListener(v.ForwardID)
+			if v.Target != "" {
+				// Origin-side request: node A asks node B (Target) to dial.
+				d, ok := s.server.registry.Get(v.Target)
+				if !ok || d.Conn == nil {
+					_ = s.SendRaw(replyErrBytes(v.MsgID, "device_offline: "+v.Target))
+					continue
+				}
+				s.server.forwards.OpenStream(v.StreamID, s, d.Conn)
+				s.server.router.Register(v.MsgID, s, false)
+				if err := d.Conn.SendRaw(raw); err != nil {
+					s.server.forwards.CloseStream(v.StreamID)
+					s.server.router.Unregister(v.MsgID)
+					_ = s.SendRaw(replyErrBytes(v.MsgID, err.Error()))
+				}
+				continue
+			}
+			// Dial-back: node B accepted on a listener owned by some node A; route
+			// back to A via forward_id.
+			owner, ok := s.server.forwards.LookupListener(v.ForwardID)
 			if !ok {
 				continue
 			}
-			s.server.forwards.OpenStream(v.StreamID, client, s)
-			s.server.router.Register(v.MsgID, client, false)
-			_ = client.SendRaw(raw)
+			s.server.forwards.OpenStream(v.StreamID, owner, s)
+			s.server.router.Register(v.MsgID, owner, false)
+			_ = owner.SendRaw(raw)
 			continue
 		case *protocol.ForwardData:
 			client, _, ok := s.server.forwards.LookupStream(v.StreamID)
@@ -196,6 +243,13 @@ func msgID(m protocol.Message) string {
 }
 
 func (s *deviceSession) Close() { s.conn.Close(websocket.StatusNormalClosure, "") }
+
+// replyErrBytes encodes a Reply{OK:false} into wire bytes; errors during
+// encoding are silently dropped (the result will be nil, which callers ignore).
+func replyErrBytes(msgID, errStr string) []byte {
+	raw, _ := protocol.Encode(&protocol.Reply{MsgID: msgID, OK: false, Error: errStr})
+	return raw
+}
 
 type authError struct{ msg string }
 
