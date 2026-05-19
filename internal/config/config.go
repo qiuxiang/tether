@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/qiuxiang/tether/internal/forward"
 	"gopkg.in/yaml.v3"
 )
 
@@ -14,10 +15,19 @@ type Hub struct {
 }
 
 type Node struct {
-	HubURL           string `yaml:"hub_url"`
-	Token            string `yaml:"token"`
-	HostnameOverride string `yaml:"hostname_override"`
-	LogDir           string `yaml:"log_dir"`
+	HubURL           string         `yaml:"hub_url"`
+	Token            string         `yaml:"token"`
+	HostnameOverride string         `yaml:"hostname_override"`
+	LogDir           string         `yaml:"log_dir"`
+	Forwards         []forward.Rule `yaml:"-"`
+}
+
+type rawNode struct {
+	HubURL           string   `yaml:"hub_url"`
+	Token            string   `yaml:"token"`
+	HostnameOverride string   `yaml:"hostname_override"`
+	LogDir           string   `yaml:"log_dir"`
+	Forwards         []string `yaml:"forwards"`
 }
 
 func LoadHub(path string) (*Hub, error) {
@@ -43,19 +53,30 @@ func LoadNode(path string) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	var c Node
-	if err := yaml.Unmarshal(data, &c); err != nil {
+	var raw rawNode
+	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
-	if c.HubURL == "" {
+	if raw.HubURL == "" {
 		return nil, errors.New("config: hub_url is required")
 	}
-	if c.Token == "" {
+	if raw.Token == "" {
 		return nil, errors.New("config: token is required")
 	}
-	if c.LogDir == "" {
-		home, _ := os.UserHomeDir()
-		c.LogDir = filepath.Join(home, ".local", "share", "tether", "logs")
+	rules, err := forward.ParseAll(raw.Forwards)
+	if err != nil {
+		return nil, err
 	}
-	return &c, nil
+	logDir := raw.LogDir
+	if logDir == "" {
+		home, _ := os.UserHomeDir()
+		logDir = filepath.Join(home, ".local", "share", "tether", "logs")
+	}
+	return &Node{
+		HubURL:           raw.HubURL,
+		Token:            raw.Token,
+		HostnameOverride: raw.HostnameOverride,
+		LogDir:           logDir,
+		Forwards:         rules,
+	}, nil
 }
