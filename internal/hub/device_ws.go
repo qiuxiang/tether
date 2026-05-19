@@ -229,7 +229,7 @@ func (s *deviceSession) run(ctx context.Context) {
 		if id != "" {
 			s.router.ForwardToClient(id, raw)
 			switch v := msg.(type) {
-			case *protocol.ExecExit:
+			case *protocol.ProcessExit:
 				s.router.Unregister(id)
 			case *protocol.FileChunk:
 				if v.EOF {
@@ -247,9 +247,9 @@ func msgID(m protocol.Message) string {
 	switch v := m.(type) {
 	case *protocol.Reply:
 		return v.MsgID
-	case *protocol.ExecOutput:
+	case *protocol.ProcessOutput:
 		return v.MsgID
-	case *protocol.ExecExit:
+	case *protocol.ProcessExit:
 		return v.MsgID
 	case *protocol.FileChunk:
 		return v.MsgID
