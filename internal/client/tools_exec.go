@@ -42,12 +42,13 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 
 	m.AddTool(
 		mcp.NewTool("exec",
-			mcp.WithDescription("Run a command on a device, wait for it to exit, return merged pty output. If the MCP call is cancelled while the command is still running, returns success with timed_out=true and a process_id so the caller can re-attach or inspect via list_processes/capture_screen/kill_process. The command keeps running on the device in that case."),
+			mcp.WithDescription("Run a command on a device, wait for it to exit, return merged pty output. If the command does not exit within `timeout` seconds (default 30), returns success with timed_out=true and a process_id so the caller can re-attach or inspect via list_processes/capture_screen/kill_process. The command keeps running on the device in that case."),
 			mcp.WithString("device", mcp.Required()),
 			mcp.WithString("cmd", mcp.Required(), mcp.Description("Shell command (passed to sh -c)")),
 			mcp.WithString("cwd"),
 			mcp.WithObject("env"),
 			mcp.WithString("stdin"),
+			mcp.WithNumber("timeout", mcp.Description("Seconds to wait before returning with timed_out=true. Default 30. The remote process keeps running on timeout.")),
 			mcp.WithString("description", mcp.Description("Free-form annotation so you can find this command later via list_processes when timed out.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -58,6 +59,13 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			stdin, _ := args["stdin"].(string)
 			desc, _ := args["description"].(string)
 			envMap := extractStringMap(args["env"])
+
+			timeout := 30 * time.Second
+			if t, ok := args["timeout"].(float64); ok && t > 0 {
+				timeout = time.Duration(t) * time.Second
+			}
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
 
 			pid := NewMsgID()
 
