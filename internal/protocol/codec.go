@@ -42,6 +42,8 @@ func setType(m Message) {
 	switch v := m.(type) {
 	case *Start:
 		v.Type = m.msgType()
+	case *Exec:
+		v.Type = m.msgType()
 	case *Stdin:
 		v.Type = m.msgType()
 	case *Kill:
@@ -109,6 +111,8 @@ func Decode(data []byte) (Message, error) {
 	switch hdr.Type {
 	case "start":
 		m = &Start{}
+	case "exec":
+		m = &Exec{}
 	case "stdin":
 		m = &Stdin{}
 	case "kill":

@@ -12,6 +12,21 @@ type Start struct {
 	Description string            `cbor:"description,omitempty"`
 }
 
+// Exec — client → hub → node. Runs Cmd as a plain subprocess, waits for it
+// to exit (or until Timeout seconds elapse, default 30, after which the node
+// kills the process group), and returns the result in a single Reply.
+// Reply.Data: {stdout string, stderr string, exit_code int, timed_out bool,
+// truncated bool}.
+type Exec struct {
+	Type    string            `cbor:"type"`
+	MsgID   string            `cbor:"msg_id"`
+	Target  string            `cbor:"target,omitempty"`
+	Cmd     []string          `cbor:"cmd"`
+	Cwd     string            `cbor:"cwd,omitempty"`
+	Env     map[string]string `cbor:"env,omitempty"`
+	Timeout int               `cbor:"timeout,omitempty"`
+}
+
 type Stdin struct {
 	Type      string `cbor:"type"`
 	Target    string `cbor:"target,omitempty"`
@@ -219,6 +234,7 @@ type Message interface {
 }
 
 func (m *Start) msgType() string       { return "start" }
+func (m *Exec) msgType() string        { return "exec" }
 func (m *Stdin) msgType() string       { return "stdin" }
 func (m *Kill) msgType() string        { return "kill" }
 func (m *CaptureScreen) msgType() string  { return "capture_screen" }

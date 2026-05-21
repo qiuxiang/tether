@@ -211,3 +211,35 @@ func TestCodecRoundTripEditFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, in, out)
 }
+
+func TestRoundTripExec(t *testing.T) {
+	in := &Exec{
+		MsgID:   "m1",
+		Target:  "host-a",
+		Cmd:     []string{"sh", "-c", "ls"},
+		Cwd:     "/tmp",
+		Env:     map[string]string{"A": "b"},
+		Timeout: 10,
+	}
+	enc, err := Encode(in)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := Decode(enc)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got, ok := decoded.(*Exec)
+	if !ok {
+		t.Fatalf("decoded type = %T, want *Exec", decoded)
+	}
+	if got.MsgID != in.MsgID || got.Target != in.Target || got.Cwd != in.Cwd || got.Timeout != in.Timeout {
+		t.Fatalf("scalar mismatch: %+v vs %+v", got, in)
+	}
+	if len(got.Cmd) != 3 || got.Cmd[2] != "ls" || got.Env["A"] != "b" {
+		t.Fatalf("slice/map mismatch: %+v", got)
+	}
+	if got.Type != "exec" {
+		t.Fatalf("Type = %q, want exec", got.Type)
+	}
+}
