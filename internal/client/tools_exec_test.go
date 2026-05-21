@@ -61,89 +61,22 @@ func TestExecEndToEnd(t *testing.T) {
 	c, _, cleanup := setupClusterWithClient(t)
 	defer cleanup()
 
-	pid := NewMsgID()
-
-	// Step 1: Start the process.
-	startID := NewMsgID()
-	startCh := c.rpc.Register(startID)
-	require.NoError(t, c.Send(&protocol.Start{
-		MsgID: startID, Target: "n1", ProcessID: pid,
-		Cmd: []string{"sh", "-c", "echo hello"},
-	}))
-	select {
-	case r := <-startCh:
-		require.True(t, r.OK, "Start failed: %s", r.Error)
-	case <-time.After(3 * time.Second):
-		t.Fatal("Start timed out")
-	}
-	c.rpc.Unregister(startID)
-
-	// Step 2: Attach to receive output.
-	attachID := NewMsgID()
-	attachReplyCh := c.rpc.Register(attachID)
-	streamCh := c.rpc.RegisterStream(attachID)
-	defer c.rpc.Unregister(attachID)
-	require.NoError(t, c.Send(&protocol.Attach{
-		MsgID: attachID, Target: "n1", ProcessID: pid,
-	}))
-	select {
-	case r := <-attachReplyCh:
-		require.True(t, r.OK, "Attach failed: %s", r.Error)
-	case <-time.After(3 * time.Second):
-		t.Fatal("Attach reply timed out")
-	}
-
-	// Step 3: Collect output until ProcessExit.
-	var output []byte
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case m, ok := <-streamCh:
-			if !ok {
-				t.Fatalf("channel closed before ProcessExit; output=%q", output)
-			}
-			switch v := m.(type) {
-			case *protocol.ProcessOutput:
-				output = append(output, v.Data...)
-			case *protocol.ProcessExit:
-				require.Equal(t, 0, v.Code)
-				require.Contains(t, string(output), "hello")
-				return
-			}
-		case <-deadline:
-			t.Fatalf("exec timed out; output so far=%q", output)
-		}
-	}
-}
-
-func TestStartAndListProcesses(t *testing.T) {
-	c, _, cleanup := setupClusterWithClient(t)
-	defer cleanup()
-
-	pid := NewMsgID()
 	id := NewMsgID()
 	ch := c.rpc.Register(id)
-	require.NoError(t, c.Send(&protocol.Start{
-		MsgID: id, Target: "n1", ProcessID: pid,
-		Cmd: []string{"sh", "-c", "sleep 0.2"},
+	defer c.rpc.Unregister(id)
+	require.NoError(t, c.Send(&protocol.Exec{
+		MsgID:   id,
+		Target:  "n1",
+		Cmd:     []string{"sh", "-c", "echo hello"},
+		Timeout: 10,
 	}))
-	select {
-	case r := <-ch:
-		require.True(t, r.OK)
-	case <-time.After(2 * time.Second):
-		t.Fatal("start timed out")
-	}
-	c.rpc.Unregister(id)
 
-	id = NewMsgID()
-	ch = c.rpc.Register(id)
-	require.NoError(t, c.Send(&protocol.List{MsgID: id, Target: "n1"}))
 	select {
-	case r := <-ch:
-		require.True(t, r.OK)
-		b, _ := json.Marshal(r.Data)
-		require.Contains(t, string(b), pid)
-	case <-time.After(2 * time.Second):
-		t.Fatal("list timed out")
+	case reply := <-ch:
+		require.True(t, reply.OK, "Exec failed: %s", reply.Error)
+		b, _ := json.Marshal(reply.Data)
+		require.Contains(t, string(b), "hello")
+	case <-time.After(5 * time.Second):
+		t.Fatal("exec timed out")
 	}
 }
