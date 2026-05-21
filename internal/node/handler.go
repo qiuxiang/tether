@@ -30,6 +30,8 @@ func NewProcessHandler(logDir string, cap int) *ProcessHandler {
 
 func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.Message) {
 	switch m := msg.(type) {
+	case *protocol.Exec:
+		go h.handleExec(send, m)
 	case *protocol.Start:
 		h.handleStart(send, m)
 	case *protocol.Kill:
@@ -71,6 +73,21 @@ func (h *ProcessHandler) Handle(ctx context.Context, send Sender, msg protocol.M
 // ForwardHandler returns the embedded forward handler so callers (e.g. the
 // `tether join` CLI) can seed it with rules at startup.
 func (h *ProcessHandler) ForwardHandler() *ForwardHandler { return h.forwardHandler }
+
+func (h *ProcessHandler) handleExec(send Sender, m *protocol.Exec) {
+	res, err := runExec(context.Background(), m)
+	if err != nil {
+		send.Send(&protocol.Reply{MsgID: m.MsgID, OK: false, Error: err.Error()})
+		return
+	}
+	send.Send(&protocol.Reply{MsgID: m.MsgID, OK: true, Data: map[string]any{
+		"stdout":    res.Stdout,
+		"stderr":    res.Stderr,
+		"exit_code": res.ExitCode,
+		"timed_out": res.TimedOut,
+		"truncated": res.Truncated,
+	}})
+}
 
 func (h *ProcessHandler) handleStart(send Sender, m *protocol.Start) {
 	p := &Process{ID: m.ProcessID, Description: m.Description, Cmd: m.Cmd}
