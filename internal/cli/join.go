@@ -23,9 +23,13 @@ func Join(args []string, stderr io.Writer) int {
 	}
 	_ = once
 	_ = tail // wired in by the engineer if desired
-	cfg, err := config.LoadNode(*configPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if cfg.HubURL == "" {
+		fmt.Fprintln(stderr, "config: hub_url is required")
 		return 1
 	}
 	host := cfg.HostnameOverride

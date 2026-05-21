@@ -16,11 +16,11 @@ import (
 
 func Serve(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	configPath := fs.String("config", "/etc/tether/config.yaml", "Path to config")
+	configPath := fs.String("config", expandHome("~/.config/tether/config.yaml"), "Path to config")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg, err := config.LoadHub(*configPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

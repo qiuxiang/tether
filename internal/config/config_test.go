@@ -8,26 +8,32 @@ import (
 	"github.com/qiuxiang/tether/internal/forward"
 )
 
-func TestLoadHub(t *testing.T) {
+func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("listen: \":8080\"\ntoken: \"abc\"\n"), 0600)
-
-	cfg, err := LoadHub(path)
+	body := "token: abc\nlisten: \":8080\"\nhub_url: wss://x.example/device\nhostname_override: host-a\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != ":8080" || cfg.Token != "abc" {
+	if cfg.Token != "abc" || cfg.Listen != ":8080" {
+		t.Fatalf("got %+v", cfg)
+	}
+	if cfg.HubURL != "wss://x.example/device" || cfg.HostnameOverride != "host-a" {
 		t.Fatalf("got %+v", cfg)
 	}
 }
 
-func TestLoadHubDefaults(t *testing.T) {
+func TestLoadDefaultsListen(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("token: \"abc\"\n"), 0600)
-
-	cfg, err := LoadHub(path)
+	if err := os.WriteFile(path, []byte("token: abc\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,61 +42,50 @@ func TestLoadHubDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadHubMissingToken(t *testing.T) {
+func TestLoadMissingToken(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("listen: \":7000\"\n"), 0600)
-
-	_, err := LoadHub(path)
-	if err == nil {
+	if err := os.WriteFile(path, []byte("listen: \":7000\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
 		t.Fatal("expected error on missing token")
 	}
 }
 
-func TestLoadNode(t *testing.T) {
+func TestLoadForwards(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("hub_url: \"wss://x.example/device\"\ntoken: \"abc\"\n"), 0600)
-
-	cfg, err := LoadNode(path)
+	body := "token: t\nhub_url: ws://x\nforwards:\n  - \"L 9000:mac:5037\"\n  - \"R mac:8080:3000\"\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HubURL == "" || cfg.Token != "abc" {
-		t.Fatalf("got %+v", cfg)
+	if len(cfg.Forwards) != 2 {
+		t.Fatalf("got %d rules", len(cfg.Forwards))
 	}
-	if cfg.LogDir == "" {
-		t.Fatal("expected default log_dir")
-	}
-}
-
-func TestLoadNodeForwards(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "config.yaml")
-	body := "hub_url: ws://x\ntoken: t\nforwards:\n  - \"L 9000:mac:5037\"\n  - \"R mac:8080:3000\"\n"
-	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
-		t.Fatal(err)
-	}
-	c, err := LoadNode(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(c.Forwards) != 2 {
-		t.Fatalf("got %d rules", len(c.Forwards))
-	}
-	if c.Forwards[0].Dir != forward.DirLocal || c.Forwards[1].Dir != forward.DirRemote {
-		t.Fatalf("dirs wrong: %+v", c.Forwards)
+	if cfg.Forwards[0].Dir != forward.DirLocal || cfg.Forwards[1].Dir != forward.DirRemote {
+		t.Fatalf("dirs wrong: %+v", cfg.Forwards)
 	}
 }
 
-func TestLoadNodeForwardsInvalid(t *testing.T) {
+func TestLoadForwardsInvalid(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "config.yaml")
-	body := "hub_url: ws://x\ntoken: t\nforwards: [\"L bogus\"]\n"
-	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+	path := filepath.Join(dir, "config.yaml")
+	body := "token: t\nhub_url: ws://x\nforwards: [\"L bogus\"]\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadNode(p); err == nil {
+	if _, err := Load(path); err == nil {
 		t.Fatal("expected parse error")
+	}
+}
+
+func TestLoadMissingFile(t *testing.T) {
+	if _, err := Load(filepath.Join(t.TempDir(), "nope.yaml")); err == nil {
+		t.Fatal("expected error for missing file")
 	}
 }
