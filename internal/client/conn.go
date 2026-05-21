@@ -16,16 +16,17 @@ import (
 // Conn maintains a WSS connection to the hub and demultiplexes incoming
 // messages by msg_id into pending requests / streams (see rpc.go).
 type Conn struct {
-	cfg   Config
-	rpc   *RPC
+	hubURL string
+	token  string
+	rpc    *RPC
 
 	mu    sync.Mutex
 	ws    *websocket.Conn
 	ready chan struct{} // closed on each successful (re)connect
 }
 
-func NewConn(cfg Config) *Conn {
-	return &Conn{cfg: cfg, rpc: NewRPC(), ready: make(chan struct{})}
+func NewConn(hubURL, token string) *Conn {
+	return &Conn{hubURL: hubURL, token: token, rpc: NewRPC(), ready: make(chan struct{})}
 }
 
 func (c *Conn) RPC() *RPC { return c.rpc }
@@ -87,7 +88,7 @@ func (c *Conn) Run(ctx context.Context) {
 func (c *Conn) dial(ctx context.Context) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	ws, _, err := websocket.Dial(dialCtx, c.cfg.HubURL, &websocket.DialOptions{
+	ws, _, err := websocket.Dial(dialCtx, c.hubURL, &websocket.DialOptions{
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
@@ -99,7 +100,7 @@ func (c *Conn) dial(ctx context.Context) error {
 	host, _ := os.Hostname()
 	hello := &protocol.Hello{
 		Hostname:     host,
-		Token:        c.cfg.Token,
+		Token:        c.token,
 		Role:         "client",
 		AgentVersion: "0.1.0",
 	}

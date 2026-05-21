@@ -30,7 +30,7 @@ func setupClusterWithClient(t *testing.T) (*Conn, *hub.Server, func()) {
 	}, 2*time.Second, 20*time.Millisecond)
 
 	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	c := NewConn(Config{HubURL: cliURL, Token: "tk"})
+	c := NewConn(cliURL, "tk")
 	go c.Run(ctx)
 	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
 	require.NoError(t, c.WaitReady(cctx))

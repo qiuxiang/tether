@@ -42,7 +42,7 @@ func TestE2EExec(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 
 	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	c := client.NewConn(client.Config{HubURL: cliURL, Token: "secret"})
+	c := client.NewConn(cliURL, "secret")
 	go c.Run(ctx)
 	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
 	require.NoError(t, c.WaitReady(cctx))
@@ -88,7 +88,7 @@ func TestE2EExecTimeout(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 
 	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	c := client.NewConn(client.Config{HubURL: cliURL, Token: "secret"})
+	c := client.NewConn(cliURL, "secret")
 	go c.Run(ctx)
 	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
 	require.NoError(t, c.WaitReady(cctx))
@@ -135,7 +135,7 @@ func TestE2EFileTransfer(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 
 	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	c := client.NewConn(client.Config{HubURL: cliURL, Token: "secret"})
+	c := client.NewConn(cliURL, "secret")
 	go c.Run(ctx)
 	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
 	require.NoError(t, c.WaitReady(cctx))
@@ -353,7 +353,7 @@ func TestE2ERemoteFileEdit(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 
 	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	c := client.NewConn(client.Config{HubURL: cliURL, Token: "secret"})
+	c := client.NewConn(cliURL, "secret")
 	go c.Run(ctx)
 	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
 	require.NoError(t, c.WaitReady(cctx))

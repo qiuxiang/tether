@@ -28,7 +28,7 @@ func MCP(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "config: hub_url is required")
 		return 1
 	}
-	c := client.NewConn(client.Config{HubURL: cfg.HubURL, Token: cfg.Token})
+	c := client.NewConn(cfg.HubURL, cfg.Token)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
