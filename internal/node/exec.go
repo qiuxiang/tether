@@ -73,19 +73,20 @@ func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 	c.Stdout = stdout
 	c.Stderr = stderr
 
-	if err := c.Start(); err != nil {
-		return execResult{}, err
-	}
-
 	// On timeout, kill the whole process group so children don't outlive us.
-	pgid := c.Process.Pid
+	// Set Cancel/WaitDelay before Start: Start spawns a goroutine that reads
+	// these fields, so assigning them afterward would be a data race.
 	c.Cancel = func() error {
-		killGroup(pgid)
+		killGroup(c.Process.Pid)
 		return nil
 	}
 	// If a grandchild keeps the output pipe open after the group is killed,
 	// don't let Wait hang forever.
 	c.WaitDelay = 5 * time.Second
+
+	if err := c.Start(); err != nil {
+		return execResult{}, err
+	}
 
 	err := c.Wait()
 

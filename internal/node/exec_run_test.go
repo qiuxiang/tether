@@ -29,8 +29,8 @@ func TestRunExecCapturesOutputAndExit(t *testing.T) {
 		Cmd: []string{"sh", "-c", "echo out; echo err 1>&2; exit 7"},
 	})
 	require.NoError(t, err)
-	assert.Contains(t, res.Stdout, "out")
-	assert.Contains(t, res.Stderr, "err")
+	assert.Equal(t, "out\n", res.Stdout)
+	assert.Equal(t, "err\n", res.Stderr)
 	assert.Equal(t, 7, res.ExitCode)
 	assert.False(t, res.TimedOut)
 	assert.False(t, res.Truncated)
