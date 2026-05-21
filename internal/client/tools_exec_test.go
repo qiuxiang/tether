@@ -46,6 +46,7 @@ func TestListDevicesEndToEnd(t *testing.T) {
 
 	id := NewMsgID()
 	ch := c.rpc.Register(id)
+	defer c.rpc.Unregister(id)
 	require.NoError(t, c.Send(&protocol.ListDevices{MsgID: id}))
 	select {
 	case reply := <-ch:
