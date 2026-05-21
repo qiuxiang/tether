@@ -21,18 +21,24 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 	c.SetReadLimit(protocol.WSReadLimit)
 	ctx := r.Context()
 
-	sess, err := s.handshake(ctx, c)
+	sess, replaced, err := s.handshake(ctx, c)
 	if err != nil {
 		log.Printf("device handshake failed: %v", err)
 		c.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
+	if replaced != nil {
+		log.Printf("device takeover: hostname=%s (evicting stale session)", sess.device.Hostname)
+		replaced.Close()
+	}
 	log.Printf("device registered: hostname=%s os=%s arch=%s", sess.device.Hostname, sess.device.OS, sess.device.Arch)
 	s.broadcastDeviceEvent("device_online", sess.device.Hostname)
 	defer func() {
 		log.Printf("device disconnected: hostname=%s", sess.device.Hostname)
-		s.registry.Unregister(sess.device.Hostname)
-		s.broadcastDeviceEvent("device_offline", sess.device.Hostname)
+		owned := s.registry.UnregisterIf(sess.device.Hostname, sess)
+		if owned {
+			s.broadcastDeviceEvent("device_offline", sess.device.Hostname)
+		}
 		for _, fid := range s.forwards.RemoveListenersForClient(sess) {
 			unl := &protocol.ForwardUnlisten{ForwardID: fid}
 			raw, _ := protocol.Encode(unl)
@@ -89,13 +95,13 @@ func (s *Server) readHello(ctx context.Context, c *websocket.Conn) (*protocol.He
 	return hello, nil
 }
 
-func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSession, error) {
+func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSession, PeerConn, error) {
 	hello, err := s.readHello(ctx, c)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if hello.Role != "" && hello.Role != "node" {
-		return nil, errAuth("role must be node or empty")
+		return nil, nil, errAuth("role must be node or empty")
 	}
 	d := &Device{
 		Hostname:     hello.Hostname,
@@ -107,10 +113,8 @@ func (s *Server) handshake(ctx context.Context, c *websocket.Conn) (*deviceSessi
 	}
 	sess := &deviceSession{device: d, conn: c, router: s.router, server: s}
 	d.Conn = sess
-	if err := s.registry.Register(d); err != nil {
-		return nil, err
-	}
-	return sess, nil
+	replaced := s.registry.Register(d)
+	return sess, replaced, nil
 }
 
 func (s *deviceSession) SendRaw(raw []byte) error {

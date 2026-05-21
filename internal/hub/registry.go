@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"errors"
 	"sync"
 	"time"
 )
@@ -24,7 +23,8 @@ type Device struct {
 	AgentVersion string
 	ConnectedAt  time.Time
 	LastSeen     time.Time
-	// Conn is set by device_ws layer; nil if offline (but we Unregister on disconnect so this is always non-nil in registry)
+	// Conn is the active session for this hostname. Always non-nil while the
+	// device is registered; replaced atomically on takeover (see Register).
 	Conn PeerConn
 }
 
@@ -37,20 +37,38 @@ func NewRegistry() *Registry {
 	return &Registry{devices: make(map[string]*Device)}
 }
 
-func (r *Registry) Register(d *Device) error {
+// Register inserts d, replacing any existing entry for the same hostname.
+// If a previous entry was displaced, its Conn is returned so the caller can
+// close the stale session. This implements takeover semantics: a node that
+// reconnects after a silent network drop is not blocked by the lingering
+// registration of its previous TCP session.
+func (r *Registry) Register(d *Device) (replaced PeerConn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.devices[d.Hostname]; exists {
-		return errors.New("hostname already registered")
+	if existing, ok := r.devices[d.Hostname]; ok {
+		replaced = existing.Conn
 	}
 	r.devices[d.Hostname] = d
-	return nil
+	return replaced
 }
 
 func (r *Registry) Unregister(hostname string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.devices, hostname)
+}
+
+// UnregisterIf removes the entry for hostname only if it is currently held by
+// conn. Returns true if the entry was removed. Used by disconnect cleanup so a
+// stale session that lost a takeover race does not evict the new owner.
+func (r *Registry) UnregisterIf(hostname string, conn PeerConn) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.devices[hostname]; ok && existing.Conn == conn {
+		delete(r.devices, hostname)
+		return true
+	}
+	return false
 }
 
 func (r *Registry) Get(hostname string) (*Device, bool) {

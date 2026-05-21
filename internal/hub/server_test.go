@@ -58,19 +58,36 @@ func TestHelloHandshakeBadToken(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestHelloHandshakeDuplicateHostname(t *testing.T) {
-	base, _ := startTestServer(t, "secret")
+func TestHelloHandshakeDuplicateHostnameTakeover(t *testing.T) {
+	// A node that lost its network silently leaves a stale registration on
+	// the hub (the dead TCP socket can take minutes to surface). The
+	// reconnecting node must be able to take over its own hostname instead
+	// of being rejected forever.
+	base, s := startTestServer(t, "secret")
 	c1 := dialDevice(t, base)
 	defer c1.Close(websocket.StatusNormalClosure, "")
 
 	hello, _ := protocol.Encode(&protocol.Hello{Hostname: "mac", Token: "secret"})
 	c1.Write(context.Background(), websocket.MessageBinary, hello)
-	time.Sleep(50 * time.Millisecond)
+	assert.Eventually(t, func() bool {
+		_, ok := s.Registry().Get("mac")
+		return ok
+	}, time.Second, 10*time.Millisecond)
 
 	c2 := dialDevice(t, base)
+	defer c2.Close(websocket.StatusNormalClosure, "")
 	c2.Write(context.Background(), websocket.MessageBinary, hello)
-	_, _, err := c2.Read(context.Background())
-	assert.Error(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := c1.Read(ctx)
+	assert.Error(t, err, "stale session must be closed by takeover")
+
+	// New session must remain registered.
+	assert.Eventually(t, func() bool {
+		_, ok := s.Registry().Get("mac")
+		return ok
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestClientHandshakeWithCompression(t *testing.T) {
