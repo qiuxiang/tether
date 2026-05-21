@@ -160,23 +160,6 @@ func (cs *clientSession) routeOneShot(msgID, target string, raw []byte) {
 	}
 }
 
-func (cs *clientSession) routeStream(msgID, target string, raw []byte) {
-	if err := cs.routeTo(msgID, target, raw, true); err != nil {
-		cs.sendErrorReply(msgID, err)
-	}
-}
-
-func (cs *clientSession) forwardFireAndForget(target string, raw []byte) {
-	if target == "" {
-		return
-	}
-	d, ok := cs.server.registry.Get(target)
-	if !ok || d.Conn == nil {
-		return
-	}
-	_ = d.Conn.SendRaw(raw)
-}
-
 func (cs *clientSession) routeTo(msgID, target string, raw []byte, sticky bool) error {
 	if target == "" {
 		return errors.New("missing target")
