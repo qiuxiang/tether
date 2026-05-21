@@ -104,21 +104,7 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 	switch m := msg.(type) {
 	case *protocol.ListDevices:
 		cs.replyListDevices(m.MsgID)
-	case *protocol.Attach:
-		cs.routeStream(m.MsgID, m.Target, raw)
-	case *protocol.Detach:
-		cs.forwardFireAndForget(m.Target, raw)
-	case *protocol.Start:
-		cs.routeOneShot(m.MsgID, m.Target, raw)
 	case *protocol.Exec:
-		cs.routeOneShot(m.MsgID, m.Target, raw)
-	case *protocol.Stdin:
-		cs.forwardFireAndForget(m.Target, raw)
-	case *protocol.Kill:
-		cs.routeOneShot(m.MsgID, m.Target, raw)
-	case *protocol.CaptureScreen:
-		cs.routeOneShot(m.MsgID, m.Target, raw)
-	case *protocol.List:
 		cs.routeOneShot(m.MsgID, m.Target, raw)
 	case *protocol.FilePutOpen:
 		cs.routeFilePut(m.MsgID, m.Target, raw)
