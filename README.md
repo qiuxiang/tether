@@ -64,7 +64,7 @@ The `tether mcp` subcommand runs a stdio MCP server that holds an outbound WSS c
 }
 ```
 
-7 tools become available: `list_devices`, `exec`, `file_transfer`, `read_file`, `write_file`, `edit_file`.
+6 tools become available: `list_devices`, `exec`, `file_transfer`, `read_file`, `write_file`, `edit_file`.
 
 ### exec
 
