@@ -1,6 +1,6 @@
 # Tether
 
-A relay service that exposes behind-firewall devices (mac/linux/windows) to AI through an MCP stdio server. Devices hold an outbound WSS connection to a public-net hub; Claude Code runs a local stdio MCP server that connects to the hub to list devices, exec commands, and manage long-running processes — without each device needing its own public address.
+A relay service that exposes behind-firewall devices (mac/linux/windows) to AI through an MCP stdio server. Devices hold an outbound WSS connection to a public-net hub; Claude Code runs a local stdio MCP server that connects to the hub to list devices, exec commands, and transfer files — without each device needing its own public address.
 
 ## Build
 
@@ -34,12 +34,11 @@ Create `~/.config/tether/config.yaml`:
 hub_url: "wss://tether.example.com/device"
 token: "your-secret-token"
 hostname_override: ""                          # defaults to os.Hostname()
-log_dir: "~/.local/share/tether/logs"          # per-process log files live here
 ```
 
 Run: `./tether join`
 
-The node will connect, register, and accept commands from the hub. Processes are always launched inside a PTY (200×50 reported to the child, 200×10000 scrollback buffered for `capture_screen`).
+The node will connect, register, and accept commands from the hub. Commands are run as plain subprocesses via `sh -c`; for long-running or interactive work, run `tmux` through the `exec` tool.
 
 ## Run the MCP client (your local machine)
 
@@ -65,19 +64,20 @@ The `tether mcp` subcommand runs a stdio MCP server that holds an outbound WSS c
 }
 ```
 
-11 tools become available: `list_devices`, `exec`, `start_process`, `list_processes`, `capture_screen`, `send_stdin`, `kill_process`, `file_transfer`, `read_file`, `write_file`, `edit_file`.
+7 tools become available: `list_devices`, `exec`, `file_transfer`, `read_file`, `write_file`, `edit_file`.
 
-### capture_screen
+### exec
 
-Returns the rendered terminal screen of a running process — ANSI sequences resolved, cursor moves and CR overwrites applied, colors stripped. Works for both `tty` and pipe processes; output is what would appear on a 200-column terminal after the program's bytes are played through it.
+Runs a shell command on a device as a plain subprocess (`sh -c`), waits for it to exit, and returns its output:
 
 ```
-capture_screen(device, process_id, start_line?, end_line?)
+exec(device, cmd, cwd?, env?, timeout?=30)
+  → {stdout, stderr, exit_code, timed_out, truncated}
 ```
 
-`start_line` / `end_line` use tmux semantics: negative indices count from the end, omitted means "extreme" (top for start, bottom for end). Returns `{lines, cursor:{row,col}, cols, total_lines}`.
+If the command does not finish within `timeout` seconds (default 30), the node kills the whole process group and returns `timed_out=true` with whatever output was captured so far. Each of `stdout` and `stderr` is capped at 4 MiB; if either is truncated, `truncated=true` is set.
 
-The virtual terminal holds up to 10000 lines of scrollback. To retrieve raw bytes beyond that (or for binary debugging), use `list_processes` to read each entry's `log_path` and then `file_transfer` to fetch the file.
+For long-running or interactive work, run `tmux` through this tool — e.g. `tmux new-session -d -s foo 'long-running-cmd'` to start a session, `tmux capture-pane -pt foo` to read its output, and `tmux send-keys -t foo 'r' Enter` to send keystrokes.
 
 ### file_transfer
 
@@ -143,4 +143,4 @@ systemd unit templates are in `dist/systemd/`.
 
 ## Design
 
-See `docs/design.md` for the full design (architecture, wire protocol, process model).
+See `docs/design.md` for the full design (architecture, wire protocol, exec model).
