@@ -110,6 +110,8 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 		cs.forwardFireAndForget(m.Target, raw)
 	case *protocol.Start:
 		cs.routeOneShot(m.MsgID, m.Target, raw)
+	case *protocol.Exec:
+		cs.routeOneShot(m.MsgID, m.Target, raw)
 	case *protocol.Stdin:
 		cs.forwardFireAndForget(m.Target, raw)
 	case *protocol.Kill:
