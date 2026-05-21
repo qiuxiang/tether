@@ -241,4 +241,4 @@ forwards:                            # node：端口转发规则（可选，见 
 
 ## 10. 参考文档
 
-- [`docs/superpowers/specs/2026-05-19-port-forwarding-design.md`](superpowers/specs/2026-05-19-port-forwarding-design.md) — 端口转发详细设计（背景、架构、配置语法、wire protocol、错误处理、测试计划）。**注：** 原始设计将转发配置放在 MCP client 侧（`client.yaml`），实现时已调整为配置在 node 的 `config.yaml` 的 `forwards:` 字段，MCP client 不参与转发。
+- [`docs/superpowers/specs/2026-05-19-port-forwarding-design.md`](superpowers/specs/2026-05-19-port-forwarding-design.md) — 端口转发详细设计（背景、架构、配置语法、wire protocol、错误处理、测试计划）。**注：** 原始设计将转发配置放在 MCP client 侧，实现时已调整为配置在 node 的 `config.yaml` 的 `forwards:` 字段，MCP client 不参与转发。
