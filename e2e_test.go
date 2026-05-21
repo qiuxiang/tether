@@ -32,7 +32,6 @@ func TestE2EExec(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Node
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
 	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
@@ -42,7 +41,6 @@ func TestE2EExec(t *testing.T) {
 		return ok
 	}, 2*time.Second, 20*time.Millisecond)
 
-	// Client (uses internal/client directly without running the stdio MCP server)
 	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
 	c := client.NewConn(client.Config{HubURL: cliURL, Token: "secret"})
 	go c.Run(ctx)
@@ -50,89 +48,29 @@ func TestE2EExec(t *testing.T) {
 	require.NoError(t, c.WaitReady(cctx))
 	ccancel()
 
-	pid := client.NewMsgID()
-
-	// 1) Start the process.
-	startID := client.NewMsgID()
-	startCh := c.RPC().Register(startID)
-	require.NoError(t, c.Send(&protocol.Start{
-		MsgID: startID, Target: "e2e-host", ProcessID: pid,
-		Cmd:         []string{"sh", "-c", "echo hello"},
-		Description: "greet",
-	}))
-	select {
-	case r := <-startCh:
-		require.True(t, r.OK, "start reply: %+v", r)
-	case <-time.After(2 * time.Second):
-		t.Fatal("start reply timeout")
-	}
-	c.RPC().Unregister(startID)
-
-	// 2) Attach: register both a one-shot reply channel and a stream channel.
-	attachID := client.NewMsgID()
-	attachReplyCh := c.RPC().Register(attachID)
-	attachStreamCh := c.RPC().RegisterStream(attachID)
-	defer c.RPC().Unregister(attachID)
-	require.NoError(t, c.Send(&protocol.Attach{
-		MsgID: attachID, Target: "e2e-host", ProcessID: pid,
+	id := client.NewMsgID()
+	ch := c.RPC().Register(id)
+	defer c.RPC().Unregister(id)
+	require.NoError(t, c.Send(&protocol.Exec{
+		MsgID:  id,
+		Target: "e2e-host",
+		Cmd:    []string{"sh", "-c", "echo hello; echo oops 1>&2; exit 3"},
 	}))
 
-	// Wait for the Attach reply OK.
+	var reply *protocol.Reply
 	select {
-	case r := <-attachReplyCh:
-		require.True(t, r.OK, "attach reply: %+v", r)
-	case <-time.After(2 * time.Second):
-		t.Fatal("attach reply timeout")
+	case reply = <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("exec reply timeout")
 	}
-
-	// 3) Drain ProcessOutput chunks and wait for ProcessExit.
-	var stdout []byte
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case m, ok := <-attachStreamCh:
-			if !ok {
-				t.Fatalf("stream channel closed before ProcessExit; stdout=%q", stdout)
-			}
-			switch v := m.(type) {
-			case *protocol.ProcessOutput:
-				stdout = append(stdout, v.Data...)
-			case *protocol.ProcessExit:
-				assert.Equal(t, 0, v.Code)
-				assert.Contains(t, string(stdout), "hello")
-				goto checkList
-			}
-		case <-deadline:
-			t.Fatal("exec timed out waiting for ProcessExit")
-		}
-	}
-
-checkList:
-	// 4) Verify list_processes surfaces the description field.
-	listID := client.NewMsgID()
-	listCh := c.RPC().Register(listID)
-	require.NoError(t, c.Send(&protocol.List{MsgID: listID, Target: "e2e-host", Limit: 20}))
-	var listReply *protocol.Reply
-	select {
-	case listReply = <-listCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("list reply timeout")
-	}
-	require.True(t, listReply.OK)
-	c.RPC().Unregister(listID)
-	procs := asMapSlice(listReply.Data["processes"])
-	var found bool
-	for _, p := range procs {
-		if id, _ := p["process_id"].(string); id == pid {
-			desc, _ := p["description"].(string)
-			assert.Equal(t, "greet", desc, "description mismatch for process %s", pid)
-			found = true
-		}
-	}
-	assert.True(t, found, "process %s not found in list; procs=%+v", pid, procs)
+	require.True(t, reply.OK, "exec reply: %+v", reply)
+	assert.Contains(t, reply.Data["stdout"].(string), "hello")
+	assert.Contains(t, reply.Data["stderr"].(string), "oops")
+	assert.EqualValues(t, 3, reply.Data["exit_code"])
+	assert.Equal(t, false, reply.Data["timed_out"])
 }
 
-func TestE2EExecTimeoutRecovery(t *testing.T) {
+func TestE2EExecTimeout(t *testing.T) {
 	s := hub.NewServer(hub.Options{Token: "secret"})
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -156,131 +94,27 @@ func TestE2EExecTimeoutRecovery(t *testing.T) {
 	require.NoError(t, c.WaitReady(cctx))
 	ccancel()
 
-	pid := client.NewMsgID()
-
-	// 1) Start the sleeping process.
-	startID := client.NewMsgID()
-	startCh := c.RPC().Register(startID)
-	require.NoError(t, c.Send(&protocol.Start{
-		MsgID: startID, Target: "e2e-host", ProcessID: pid,
-		Cmd:         []string{"sh", "-c", "sleep 5"},
-		Description: "stuck",
+	id := client.NewMsgID()
+	ch := c.RPC().Register(id)
+	defer c.RPC().Unregister(id)
+	start := time.Now()
+	require.NoError(t, c.Send(&protocol.Exec{
+		MsgID:   id,
+		Target:  "e2e-host",
+		Cmd:     []string{"sh", "-c", "echo started; sleep 30"},
+		Timeout: 1,
 	}))
+
+	var reply *protocol.Reply
 	select {
-	case r := <-startCh:
-		require.True(t, r.OK, "start reply: %+v", r)
-	case <-time.After(2 * time.Second):
-		t.Fatal("start reply timeout")
+	case reply = <-ch:
+	case <-time.After(10 * time.Second):
+		t.Fatal("exec reply timeout")
 	}
-	c.RPC().Unregister(startID)
-
-	// 2) Attach and wait for the Attach reply OK.
-	attachID := client.NewMsgID()
-	attachReplyCh := c.RPC().Register(attachID)
-	attachStreamCh := c.RPC().RegisterStream(attachID)
-	require.NoError(t, c.Send(&protocol.Attach{
-		MsgID: attachID, Target: "e2e-host", ProcessID: pid,
-	}))
-	select {
-	case r := <-attachReplyCh:
-		require.True(t, r.OK, "attach reply: %+v", r)
-	case <-time.After(2 * time.Second):
-		t.Fatal("attach reply timeout")
-	}
-
-	// 3) Drain any output non-blockingly for ~300ms, then detach.
-	drainDeadline := time.After(300 * time.Millisecond)
-drainLoop:
-	for {
-		select {
-		case <-attachStreamCh:
-			// drain
-		case <-drainDeadline:
-			break drainLoop
-		}
-	}
-	c.RPC().Unregister(attachID)
-
-	// 4) Send Detach (fire-and-forget).
-	require.NoError(t, c.Send(&protocol.Detach{MsgID: attachID, Target: "e2e-host", ProcessID: pid}))
-
-	// 5) Verify the process is still running via list_processes.
-	listID := client.NewMsgID()
-	listCh := c.RPC().Register(listID)
-	require.NoError(t, c.Send(&protocol.List{MsgID: listID, Target: "e2e-host", Limit: 20}))
-	var listReply *protocol.Reply
-	select {
-	case listReply = <-listCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("list reply timeout")
-	}
-	require.True(t, listReply.OK)
-	c.RPC().Unregister(listID)
-	procs := asMapSlice(listReply.Data["processes"])
-	var foundRunning bool
-	for _, p := range procs {
-		if id, _ := p["process_id"].(string); id == pid {
-			status, _ := p["status"].(string)
-			desc, _ := p["description"].(string)
-			assert.Equal(t, "running", status, "process should still be running after detach")
-			assert.Equal(t, "stuck", desc)
-			foundRunning = true
-		}
-	}
-	assert.True(t, foundRunning, "process %s not found in list after detach; procs=%+v", pid, procs)
-
-	// 6) CaptureScreen should succeed (lines may be empty, total_lines >= 0).
-	capID := client.NewMsgID()
-	capCh := c.RPC().Register(capID)
-	require.NoError(t, c.Send(&protocol.CaptureScreen{
-		MsgID: capID, Target: "e2e-host", ProcessID: pid,
-	}))
-	select {
-	case r := <-capCh:
-		require.True(t, r.OK, "capture_screen reply: %+v", r)
-		assert.GreaterOrEqual(t, asInt(r.Data["total_lines"]), 0)
-	case <-time.After(2 * time.Second):
-		t.Fatal("capture_screen reply timeout")
-	}
-	c.RPC().Unregister(capID)
-
-	// 7) Kill the process.
-	killID := client.NewMsgID()
-	killCh := c.RPC().Register(killID)
-	require.NoError(t, c.Send(&protocol.Kill{
-		MsgID: killID, Target: "e2e-host", ProcessID: pid, Signal: "TERM",
-	}))
-	select {
-	case r := <-killCh:
-		require.True(t, r.OK, "kill reply: %+v", r)
-	case <-time.After(2 * time.Second):
-		t.Fatal("kill reply timeout")
-	}
-	c.RPC().Unregister(killID)
-
-	// 8) Poll list_processes until status becomes "exited" (up to ~2s).
-	require.Eventually(t, func() bool {
-		lID := client.NewMsgID()
-		lCh := c.RPC().Register(lID)
-		defer c.RPC().Unregister(lID)
-		if err := c.Send(&protocol.List{MsgID: lID, Target: "e2e-host", Limit: 20}); err != nil {
-			return false
-		}
-		select {
-		case r := <-lCh:
-			if !r.OK {
-				return false
-			}
-			for _, p := range asMapSlice(r.Data["processes"]) {
-				if id, _ := p["process_id"].(string); id == pid {
-					status, _ := p["status"].(string)
-					return status == "exited"
-				}
-			}
-		case <-time.After(500 * time.Millisecond):
-		}
-		return false
-	}, 2*time.Second, 100*time.Millisecond, "process %s never became exited", pid)
+	require.True(t, reply.OK, "exec reply: %+v", reply)
+	assert.Equal(t, true, reply.Data["timed_out"])
+	assert.Contains(t, reply.Data["stdout"].(string), "started")
+	assert.Less(t, time.Since(start), 10*time.Second, "exec must return shortly after the node-side timeout")
 }
 
 func TestE2EFileTransfer(t *testing.T) {
@@ -338,110 +172,6 @@ func TestE2EFileTransfer(t *testing.T) {
 	got, err := os.ReadFile(remote)
 	require.NoError(t, err)
 	require.Equal(t, payload, got)
-}
-
-func TestE2ECaptureScreen(t *testing.T) {
-	s := hub.NewServer(hub.Options{Token: "secret"})
-	ts := httptest.NewServer(s.Handler())
-	defer ts.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
-	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
-	go nc.Run(ctx)
-	require.Eventually(t, func() bool {
-		_, ok := s.Registry().Get("e2e-host")
-		return ok
-	}, 2*time.Second, 20*time.Millisecond)
-
-	cliURL := strings.Replace(ts.URL, "http", "ws", 1) + "/client"
-	c := client.NewConn(client.Config{HubURL: cliURL, Token: "secret"})
-	go c.Run(ctx)
-	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
-	require.NoError(t, c.WaitReady(cctx))
-	ccancel()
-
-	// Start a short non-PTY process that emits two lines.
-	startID := client.NewMsgID()
-	startCh := c.RPC().Register(startID)
-	require.NoError(t, c.Send(&protocol.Start{
-		MsgID:     startID,
-		Target:    "e2e-host",
-		ProcessID: "e2e-cap",
-		Cmd:       []string{"sh", "-c", "printf 'foo\\nbar\\n'"},
-	}))
-	select {
-	case r := <-startCh:
-		require.True(t, r.OK, "start reply: %+v", r)
-	case <-time.After(2 * time.Second):
-		t.Fatal("start reply timeout")
-	}
-
-	// Poll capture_screen until output is rendered or timeout.
-	var lines []string
-	var totalLines int
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		capID := client.NewMsgID()
-		capCh := c.RPC().Register(capID)
-		require.NoError(t, c.Send(&protocol.CaptureScreen{
-			MsgID:     capID,
-			Target:    "e2e-host",
-			ProcessID: "e2e-cap",
-		}))
-		select {
-		case r := <-capCh:
-			if !r.OK {
-				c.RPC().Unregister(capID)
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			lines = asStrings(r.Data["lines"])
-			totalLines = asInt(r.Data["total_lines"])
-			if asInt(r.Data["cols"]) != 200 {
-				t.Fatalf("cols=%v want 200", r.Data["cols"])
-			}
-			if totalLines >= 2 {
-				goto have
-			}
-		case <-time.After(500 * time.Millisecond):
-			// try again
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("capture_screen never reached total_lines>=2 (last lines=%q total=%d)", lines, totalLines)
-have:
-	if len(lines) != 2 || lines[0] != "foo" || lines[1] != "bar" {
-		t.Fatalf("lines=%q", lines)
-	}
-
-	// Verify list_processes surfaces a working log_path.
-	listID := client.NewMsgID()
-	listCh := c.RPC().Register(listID)
-	require.NoError(t, c.Send(&protocol.List{MsgID: listID, Target: "e2e-host", Limit: 10}))
-	var listReply *protocol.Reply
-	select {
-	case listReply = <-listCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("list reply timeout")
-	}
-	require.True(t, listReply.OK)
-	procs := asMapSlice(listReply.Data["processes"])
-	var logPath string
-	for _, p := range procs {
-		if id, _ := p["process_id"].(string); id == "e2e-cap" {
-			logPath, _ = p["log_path"].(string)
-		}
-	}
-	if logPath == "" {
-		t.Fatalf("log_path missing for e2e-cap; procs=%+v", procs)
-	}
-	if _, err := os.Stat(logPath); err != nil {
-		t.Fatalf("log_path does not exist: %v", err)
-	}
 }
 
 func asInt(v any) int {
