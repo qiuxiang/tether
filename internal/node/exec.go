@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -49,6 +51,14 @@ func (w *cappedBuffer) Write(p []byte) (int, error) {
 		w.truncated = true
 	}
 	return len(p), nil
+}
+
+func mergeEnv(extra map[string]string) []string {
+	base := os.Environ()
+	for k, v := range extra {
+		base = append(base, fmt.Sprintf("%s=%s", k, v))
+	}
+	return base
 }
 
 // runExec runs m.Cmd to completion or until the timeout, whichever comes

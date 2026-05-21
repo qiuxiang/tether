@@ -34,7 +34,7 @@ func TestE2EExec(t *testing.T) {
 
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
+	nc.SetHandler(node.NewHandler())
 	go nc.Run(ctx)
 	require.Eventually(t, func() bool {
 		_, ok := s.Registry().Get("e2e-host")
@@ -80,7 +80,7 @@ func TestE2EExecTimeout(t *testing.T) {
 
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
+	nc.SetHandler(node.NewHandler())
 	go nc.Run(ctx)
 	require.Eventually(t, func() bool {
 		_, ok := s.Registry().Get("e2e-host")
@@ -127,7 +127,7 @@ func TestE2EFileTransfer(t *testing.T) {
 
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
+	nc.SetHandler(node.NewHandler())
 	go nc.Run(ctx)
 	require.Eventually(t, func() bool {
 		_, ok := s.Registry().Get("e2e-host")
@@ -200,7 +200,7 @@ func TestE2EForwardLocalSelfLoop(t *testing.T) {
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 
 	// Node A: holds the L rule; its local listener is what the test connects to.
-	phA := node.NewProcessHandler(t.TempDir(), 50)
+	phA := node.NewHandler()
 	phA.ForwardHandler().InitRules([]forward.Rule{rule})
 	ncA := node.New(node.Config{
 		HubURL: nodeURL, Token: "secret", Hostname: "e2e-host-a",
@@ -212,7 +212,7 @@ func TestE2EForwardLocalSelfLoop(t *testing.T) {
 	go ncA.Run(ctx)
 
 	// Node B: target of the L rule; dials the echo server when ForwardDial arrives.
-	phB := node.NewProcessHandler(t.TempDir(), 50)
+	phB := node.NewHandler()
 	ncB := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host-b"})
 	ncB.SetHandler(phB)
 	go ncB.Run(ctx)
@@ -267,7 +267,7 @@ func TestE2EForwardRemoteSelfLoop(t *testing.T) {
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 
 	// Node A: holds the R rule; dials the echo server on each accepted connection.
-	phA := node.NewProcessHandler(t.TempDir(), 50)
+	phA := node.NewHandler()
 	phA.ForwardHandler().InitRules([]forward.Rule{rule})
 
 	addrCh := make(chan string, 1)
@@ -283,7 +283,7 @@ func TestE2EForwardRemoteSelfLoop(t *testing.T) {
 	go ncA.Run(ctx)
 
 	// Node B: target of the R rule; opens the TCP listener when ForwardListen arrives.
-	phB := node.NewProcessHandler(t.TempDir(), 50)
+	phB := node.NewHandler()
 	ncB := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host-b"})
 	ncB.SetHandler(phB)
 	go ncB.Run(ctx)
@@ -345,7 +345,7 @@ func TestE2ERemoteFileEdit(t *testing.T) {
 
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 	nc := node.New(node.Config{HubURL: nodeURL, Token: "secret", Hostname: "e2e-host"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
+	nc.SetHandler(node.NewHandler())
 	go nc.Run(ctx)
 	require.Eventually(t, func() bool {
 		_, ok := s.Registry().Get("e2e-host")

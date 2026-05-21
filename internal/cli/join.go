@@ -32,7 +32,7 @@ func Join(args []string, stderr io.Writer) int {
 	if host == "" {
 		host, _ = os.Hostname()
 	}
-	ph := node.NewProcessHandler(cfg.LogDir, 50)
+	ph := node.NewHandler()
 	ph.ForwardHandler().InitRules(cfg.Forwards)
 
 	cli := node.New(node.Config{

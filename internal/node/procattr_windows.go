@@ -4,10 +4,6 @@ package node
 
 import "syscall"
 
-func childAttrPTY() *syscall.SysProcAttr {
-	return nil
-}
-
 func killGroup(_ int) {}
 
 // childAttrExec is a no-op on Windows; killGroup is also a no-op there and

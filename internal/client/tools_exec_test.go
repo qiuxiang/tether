@@ -21,7 +21,7 @@ func setupClusterWithClient(t *testing.T) (*Conn, *hub.Server, func()) {
 
 	nodeURL := strings.Replace(ts.URL, "http", "ws", 1) + "/device"
 	nc := node.New(node.Config{HubURL: nodeURL, Token: "tk", Hostname: "n1"})
-	nc.SetHandler(node.NewProcessHandler(t.TempDir(), 50))
+	nc.SetHandler(node.NewHandler())
 	ctx, cancel := context.WithCancel(context.Background())
 	go nc.Run(ctx)
 	require.Eventually(t, func() bool {
