@@ -18,7 +18,8 @@ All three subcommands (`serve`, `join`, `mcp`) read `~/.config/tether/config.yam
 # ~/.config/tether/config.yaml
 token: "your-secret-token"            # required by every role
 listen: ":7000"                       # hub: address to listen on (default :7000)
-hub_url: "wss://tether.example.com/device"  # node uses /device; MCP client uses /client — set the full path for your role
+# hub_url — node connects to /device, MCP client to /client; set the one for this host's role:
+hub_url: "wss://tether.example.com/device"
 hostname_override: ""                 # node: registered hostname (defaults to os.Hostname())
 forwards:                             # node: port-forward rules (optional)
   - "L 9000:mac:5037"

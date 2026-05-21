@@ -184,7 +184,8 @@ tether mcp                # stdio MCP server（Claude Code 本地起）
 # ~/.config/tether/config.yaml — 一个文件，驱动任意角色
 token: "shared-secret"               # 必填，所有角色共用
 listen: ":7000"                      # hub：监听地址（默认 :7000）
-hub_url: "wss://hub.example/device"  # node 用 /device，MCP client 用 /client；两种角色需配不同路径
+# hub_url — node 连 /device，MCP client 连 /client；按本机角色二选一：
+hub_url: "wss://hub.example/device"
 hostname_override: ""                # node：注册时使用的主机名（可选，默认 os.Hostname()）
 forwards:                            # node：端口转发规则（可选，见 §4 端口转发类）
   - "L 9000:peer:5037"               # 本节点 127.0.0.1:9000 → peer 的 localhost:5037
