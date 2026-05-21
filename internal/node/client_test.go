@@ -91,8 +91,8 @@ func TestClientOnConnectedFired(t *testing.T) {
 type echoHandler struct{}
 
 func (echoHandler) Handle(ctx context.Context, send Sender, msg protocol.Message) {
-	if list, ok := msg.(*protocol.List); ok {
-		send.Send(&protocol.Reply{MsgID: list.MsgID, OK: true, Data: map[string]any{"echo": "list"}})
+	if req, ok := msg.(*protocol.Exec); ok {
+		send.Send(&protocol.Reply{MsgID: req.MsgID, OK: true, Data: map[string]any{"echo": "list"}})
 	}
 }
 
@@ -145,7 +145,7 @@ func TestRequestReplyRoundtrip(t *testing.T) {
 	s.Router().Register(msgID, capture, false)
 	defer s.Router().Unregister(msgID)
 
-	req := &protocol.List{MsgID: msgID}
+	req := &protocol.Exec{MsgID: msgID, Cmd: []string{"echo", "hello"}}
 	raw, err := protocol.Encode(req)
 	require.NoError(t, err)
 	require.NoError(t, dev.Conn.SendRaw(raw))

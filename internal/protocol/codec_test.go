@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,25 +25,6 @@ func TestEncodeDecodeHello(t *testing.T) {
 	}
 }
 
-func TestEncodeDecodeProcessOutput(t *testing.T) {
-	msg := ProcessOutput{MsgID: "abc", Offset: 42, Data: []byte{0x00, 0xFF, 0x80, 0x7F}}
-	data, err := Encode(&msg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := decoded.(*ProcessOutput)
-	if !bytes.Equal(got.Data, msg.Data) {
-		t.Fatalf("binary data round-trip failed: %v", got.Data)
-	}
-	if got.Offset != 42 {
-		t.Fatalf("offset round-trip: got %d, want 42", got.Offset)
-	}
-}
-
 func TestDecodeUnknownType(t *testing.T) {
 	raw, _ := Encode(&rawMsg{Type: "nope"})
 	_, err := Decode(raw)
@@ -63,43 +43,6 @@ func TestRoundTripListDevices(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "abc", got.MsgID)
 	require.Equal(t, "list_devices", got.Type)
-}
-
-func TestRoundTripStartWithTarget(t *testing.T) {
-	in := &Start{MsgID: "m1", Target: "host-a", ProcessID: "p1", Cmd: []string{"sh", "-c", "ls"}, Description: "list files"}
-	raw, err := Encode(in)
-	require.NoError(t, err)
-	out, err := Decode(raw)
-	require.NoError(t, err)
-	got, ok := out.(*Start)
-	require.True(t, ok)
-	require.Equal(t, "host-a", got.Target)
-	require.Equal(t, "m1", got.MsgID)
-	require.Equal(t, "p1", got.ProcessID)
-	require.Equal(t, "list files", got.Description)
-}
-
-func TestRoundTripAttach(t *testing.T) {
-	in := &Attach{MsgID: "m1", Target: "host-a", ProcessID: "p1", FromOffset: 1024}
-	raw, err := Encode(in)
-	require.NoError(t, err)
-	out, err := Decode(raw)
-	require.NoError(t, err)
-	got, ok := out.(*Attach)
-	require.True(t, ok)
-	require.Equal(t, "p1", got.ProcessID)
-	require.Equal(t, int64(1024), got.FromOffset)
-}
-
-func TestRoundTripProcessExit(t *testing.T) {
-	in := &ProcessExit{MsgID: "m1", Code: 137}
-	raw, err := Encode(in)
-	require.NoError(t, err)
-	out, err := Decode(raw)
-	require.NoError(t, err)
-	got, ok := out.(*ProcessExit)
-	require.True(t, ok)
-	require.Equal(t, 137, got.Code)
 }
 
 func TestRoundTripHelloRole(t *testing.T) {
@@ -149,40 +92,6 @@ func TestRoundTripFileRelay(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "a", got.FromNode)
 	require.Equal(t, "/b", got.ToPath)
-}
-
-func TestRoundTripCaptureScreen(t *testing.T) {
-	start, end := -10, -1
-	cases := []*CaptureScreen{
-		{MsgID: "m1", Target: "node1", ProcessID: "p1", StartLine: &start, EndLine: &end},
-		{MsgID: "m2", Target: "node2", ProcessID: "p2", StartLine: nil, EndLine: nil},
-	}
-	for _, m := range cases {
-		raw, err := Encode(m)
-		if err != nil {
-			t.Fatalf("encode: %v", err)
-		}
-		decoded, err := Decode(raw)
-		if err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		got, ok := decoded.(*CaptureScreen)
-		if !ok {
-			t.Fatalf("decoded type: %T", decoded)
-		}
-		if got.MsgID != m.MsgID || got.Target != m.Target || got.ProcessID != m.ProcessID {
-			t.Fatalf("mismatch: %+v vs %+v", got, m)
-		}
-		if (got.StartLine == nil) != (m.StartLine == nil) || (got.EndLine == nil) != (m.EndLine == nil) {
-			t.Fatalf("nil mismatch: got %v %v vs %v %v", got.StartLine, got.EndLine, m.StartLine, m.EndLine)
-		}
-		if m.StartLine != nil && *got.StartLine != *m.StartLine {
-			t.Fatalf("StartLine: %d vs %d", *got.StartLine, *m.StartLine)
-		}
-		if m.EndLine != nil && *got.EndLine != *m.EndLine {
-			t.Fatalf("EndLine: %d vs %d", *got.EndLine, *m.EndLine)
-		}
-	}
 }
 
 func TestCodecRoundTripReadFile(t *testing.T) {

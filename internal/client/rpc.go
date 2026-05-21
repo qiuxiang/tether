@@ -69,26 +69,6 @@ func (r *RPC) Deliver(msg protocol.Message) {
 			default:
 			}
 		}
-	case *protocol.ProcessOutput:
-		r.mu.Lock()
-		ch, ok := r.streams[m.MsgID]
-		r.mu.Unlock()
-		if ok {
-			select {
-			case ch <- m:
-			default:
-				// Consumer is gone or stalled; drop. Stream is closing.
-			}
-		}
-	case *protocol.ProcessExit:
-		r.mu.Lock()
-		ch, ok := r.streams[m.MsgID]
-		r.mu.Unlock()
-		if ok {
-			ch <- m
-			close(ch)
-			r.Unregister(m.MsgID)
-		}
 	case *protocol.FileChunk:
 		r.mu.Lock()
 		ch, ok := r.streams[m.MsgID]
