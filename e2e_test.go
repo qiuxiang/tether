@@ -174,59 +174,6 @@ func TestE2EFileTransfer(t *testing.T) {
 	require.Equal(t, payload, got)
 }
 
-func asInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case uint64:
-		return int(n)
-	case float64:
-		return int(n)
-	}
-	return -1
-}
-
-func asStrings(v any) []string {
-	if ss, ok := v.([]string); ok {
-		return ss
-	}
-	if anys, ok := v.([]any); ok {
-		out := make([]string, len(anys))
-		for i, x := range anys {
-			out[i], _ = x.(string)
-		}
-		return out
-	}
-	return nil
-}
-
-func asMapSlice(v any) []map[string]any {
-	if ms, ok := v.([]map[string]any); ok {
-		return ms
-	}
-	if anys, ok := v.([]any); ok {
-		out := make([]map[string]any, 0, len(anys))
-		for _, x := range anys {
-			switch mm := x.(type) {
-			case map[string]any:
-				out = append(out, mm)
-			case map[any]any:
-				conv := make(map[string]any, len(mm))
-				for k, vv := range mm {
-					if ks, ok := k.(string); ok {
-						conv[ks] = vv
-					}
-				}
-				out = append(out, conv)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
 // TestE2EForwardLocalSelfLoop exercises the L (local) forward rule end-to-end.
 // Node A holds the rule and listens locally; the hub routes each accepted
 // connection to Node B which dials the echo server.
