@@ -10,16 +10,25 @@ make build
 
 Produces `./tether` (single binary, three subcommands: `serve`, `join`, `mcp`).
 
-## Run the hub (public-net machine)
+## Config file
 
-Create `/etc/tether/config.yaml`:
+All three subcommands (`serve`, `join`, `mcp`) read `~/.config/tether/config.yaml` by default (override with `--config`). A single file can drive any combination of roles — each subcommand reads only the fields its role needs and ignores the rest.
 
 ```yaml
-listen: ":7000"
-token: "your-secret-token"
+# ~/.config/tether/config.yaml
+token: "your-secret-token"            # required by every role
+listen: ":7000"                       # hub: address to listen on (default :7000)
+hub_url: "wss://tether.example.com/device"  # node + MCP client: hub WebSocket URL
+hostname_override: ""                 # node: registered hostname (defaults to os.Hostname())
+forwards:                             # node: port-forward rules (optional)
+  - "L 9000:mac:5037"
 ```
 
-Run: `./tether serve --config /etc/tether/config.yaml`
+## Run the hub (public-net machine)
+
+```bash
+./tether serve
+```
 
 Put nginx/caddy in front of port 7000 for TLS. The hub serves three paths:
 - `/device` — WSS endpoint for nodes (`tether join`)
@@ -28,25 +37,16 @@ Put nginx/caddy in front of port 7000 for TLS. The hub serves three paths:
 
 ## Run a node (each behind-firewall device)
 
-Create `~/.config/tether/config.yaml`:
-
-```yaml
-hub_url: "wss://tether.example.com/device"
-token: "your-secret-token"
-hostname_override: ""                          # defaults to os.Hostname()
+```bash
+./tether join
 ```
-
-Run: `./tether join`
 
 The node will connect, register, and accept commands from the hub. Commands are run as plain subprocesses via `sh -c`; for long-running or interactive work, run `tmux` through the `exec` tool.
 
 ## Run the MCP client (your local machine)
 
-Create `~/.config/tether/client.yaml`:
-
-```yaml
-hub_url: "wss://tether.example.com/client"
-token: "your-secret-token"
+```bash
+./tether mcp
 ```
 
 The `tether mcp` subcommand runs a stdio MCP server that holds an outbound WSS connection to the hub's `/client` endpoint and translates MCP tool calls into hub-routed requests.
@@ -115,13 +115,10 @@ All paths must be `node:/abs/path` or `node:~/path` — local files are handled 
 
 ### Port forwarding
 
-Configure `tether join` (in the node's `config.yaml`) to multiplex TCP forwards
-over the hub:
+Add `forwards` rules to the node's `~/.config/tether/config.yaml` to multiplex
+TCP forwards over the hub:
 
 ```yaml
-hub_url: "wss://tether.example.com/device"
-token: "your-secret-token"
-hostname_override: "coder"
 forwards:
   - "L 9000:mac:5037"           # bind 127.0.0.1:9000 on this node → mac's localhost:5037
   - "L 0.0.0.0:9000:mac:5037"   # bind 0.0.0.0:9000 on this node → mac's localhost:5037

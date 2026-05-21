@@ -176,36 +176,32 @@ tether join               # node，连入中继（被管设备）
 tether mcp                # stdio MCP server（Claude Code 本地起）
 ```
 
-**Hub 配置（`/etc/tether/config.yaml`）：**
+**统一配置文件（`~/.config/tether/config.yaml`）：**
+
+三个子命令（`serve`、`join`、`mcp`）共用同一份配置文件，每个子命令只读取自己角色所需的字段，忽略其余字段。一台机器同时承担多个角色时无需维护多份配置文件。
 
 ```yaml
-listen: ":7000"
-token: "xxx"
-# 路径：
-#   /device   node WS endpoint
-#   /client   MCP client WS endpoint
-#   /health   liveness probe (no auth)
+# ~/.config/tether/config.yaml — 一个文件，驱动任意角色
+token: "shared-secret"               # 必填，所有角色共用
+listen: ":7000"                      # hub：监听地址（默认 :7000）
+hub_url: "wss://hub.example/device"  # node + MCP client：hub WebSocket 地址
+hostname_override: "my-host"         # node：注册时使用的主机名（可选，默认 os.Hostname()）
+forwards:                            # node：端口转发规则（可选，见 §4 端口转发类）
+  - "L 9000:peer:5037"               # 本节点 127.0.0.1:9000 → peer 的 localhost:5037
+  - "R peer:8080:3000"               # peer 的 127.0.0.1:8080 → 本节点的 127.0.0.1:3000
 ```
 
-**Node 配置（`~/.config/tether/config.yaml`）：**
+字段与角色的对应关系：
 
-```yaml
-hub_url: "wss://tether.example.com/device"
-token: "xxx"
-hostname_override: ""                  # 默认 os.Hostname()
-forwards:                              # 可选，端口转发规则（见 §4 端口转发类）
-  - "L 9000:peer:5037"                 # 本节点 127.0.0.1:9000 → peer 的 localhost:5037
-  - "R peer:8080:3000"                 # peer 的 127.0.0.1:8080 → 本节点的 127.0.0.1:3000
-```
+| 字段 | hub (`serve`) | node (`join`) | MCP client (`mcp`) |
+|---|---|---|---|
+| `token` | ✓ | ✓ | ✓ |
+| `listen` | ✓ | — | — |
+| `hub_url` | — | ✓ | ✓ |
+| `hostname_override` | — | ✓ | — |
+| `forwards` | — | ✓ | — |
 
 转发规则配置在 node 自身的 `config.yaml` 下，MCP client（`tether mcp`）无需配置任何转发项。
-
-**MCP client 配置（`~/.config/tether/client.yaml`）：**
-
-```yaml
-hub_url: "wss://tether.example.com/client"
-token: "xxx"
-```
 
 **Claude Code MCP 配置：**
 
