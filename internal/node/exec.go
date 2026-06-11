@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/qiuxiang/tether/internal/protocol"
@@ -53,6 +54,14 @@ func (w *cappedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// shellArgv wraps a shell command string in the node's native shell.
+func shellArgv(cmd string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cmd", "/c", cmd}
+	}
+	return []string{"sh", "-c", cmd}
+}
+
 func mergeEnv(extra map[string]string) []string {
 	base := os.Environ()
 	for k, v := range extra {
@@ -61,10 +70,10 @@ func mergeEnv(extra map[string]string) []string {
 	return base
 }
 
-// runExec runs m.Cmd to completion or until the timeout, whichever comes
-// first. On timeout the whole process group is killed and TimedOut is set.
-// The returned error is non-nil only when the process failed to start at the
-// OS level (e.g. a bad working directory).
+// runExec runs m.Cmd through the native shell to completion or until the
+// timeout, whichever comes first. On timeout the whole process group is
+// killed and TimedOut is set. The returned error is non-nil only when the
+// process failed to start at the OS level (e.g. a bad working directory).
 func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 	timeout := defaultExecTimeout
 	if m.Timeout > 0 {
@@ -73,7 +82,8 @@ func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	c := exec.CommandContext(ctx, m.Cmd[0], m.Cmd[1:]...)
+	argv := shellArgv(m.Cmd)
+	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	c.Dir = m.Cwd
 	c.Env = mergeEnv(m.Env)
 	c.SysProcAttr = childAttrExec()

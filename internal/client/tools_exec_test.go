@@ -68,7 +68,7 @@ func TestExecEndToEnd(t *testing.T) {
 	require.NoError(t, c.Send(&protocol.Exec{
 		MsgID:   id,
 		Target:  "n1",
-		Cmd:     []string{"sh", "-c", "echo hello"},
+		Cmd:     "echo hello",
 		Timeout: 10,
 	}))
 

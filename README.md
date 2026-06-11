@@ -42,7 +42,7 @@ Put nginx/caddy in front of port 7000 for TLS. The hub serves three paths:
 ./tether join
 ```
 
-The node will connect, register, and accept commands from the hub. Commands are run as plain subprocesses via `sh -c`; for long-running or interactive work, run `tmux` through the `exec` tool.
+The node will connect, register, and accept commands from the hub. Commands are run as plain subprocesses via the node's native shell (`sh -c` on Unix, `cmd /c` on Windows); for long-running or interactive work, run `tmux` through the `exec` tool.
 
 ## Run the MCP client (your local machine)
 
@@ -69,7 +69,7 @@ The `tether mcp` subcommand runs a stdio MCP server that holds an outbound WSS c
 
 ### exec
 
-Runs a shell command on a device as a plain subprocess (`sh -c`), waits for it to exit, and returns its output:
+Runs a shell command on a device as a plain subprocess (`sh -c` on Unix, `cmd /c` on Windows), waits for it to exit, and returns its output:
 
 ```
 exec(device, cmd, cwd?, env?, timeout?=30)

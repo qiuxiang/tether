@@ -69,10 +69,15 @@ func TestClientOnConnectedFired(t *testing.T) {
 
 	called := make(chan struct{}, 1)
 	cli := New(Config{
-		HubURL:       wsURL,
-		Token:        "x",
-		Hostname:     "h1",
-		OnConnected:  func(_ Sender) { select { case called <- struct{}{}: default: } },
+		HubURL:   wsURL,
+		Token:    "x",
+		Hostname: "h1",
+		OnConnected: func(_ Sender) {
+			select {
+			case called <- struct{}{}:
+			default:
+			}
+		},
 		ReconnectMin: 10 * time.Millisecond,
 		ReconnectMax: 50 * time.Millisecond,
 	})
@@ -145,7 +150,7 @@ func TestRequestReplyRoundtrip(t *testing.T) {
 	s.Router().Register(msgID, capture, false)
 	defer s.Router().Unregister(msgID)
 
-	req := &protocol.Exec{MsgID: msgID, Cmd: []string{"echo", "hello"}}
+	req := &protocol.Exec{MsgID: msgID, Cmd: "echo hello"}
 	raw, err := protocol.Encode(req)
 	require.NoError(t, err)
 	require.NoError(t, dev.Conn.SendRaw(raw))

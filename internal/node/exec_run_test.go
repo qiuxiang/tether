@@ -26,7 +26,7 @@ func TestCappedBuffer(t *testing.T) {
 
 func TestRunExecCapturesOutputAndExit(t *testing.T) {
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd: []string{"sh", "-c", "echo out; echo err 1>&2; exit 7"},
+		Cmd: "echo out; echo err 1>&2; exit 7",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "out\n", res.Stdout)
@@ -39,7 +39,7 @@ func TestRunExecCapturesOutputAndExit(t *testing.T) {
 func TestRunExecTimeoutKills(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd:     []string{"sh", "-c", "echo started; sleep 30"},
+		Cmd:     "echo started; sleep 30",
 		Timeout: 1,
 	})
 	require.NoError(t, err)
@@ -50,7 +50,7 @@ func TestRunExecTimeoutKills(t *testing.T) {
 
 func TestRunExecStartError(t *testing.T) {
 	_, err := runExec(context.Background(), &protocol.Exec{
-		Cmd: []string{"sh", "-c", "true"},
+		Cmd: "true",
 		Cwd: "/no/such/directory/exists",
 	})
 	require.Error(t, err, "a bad working directory must surface as a start error")

@@ -41,9 +41,9 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 
 	m.AddTool(
 		mcp.NewTool("exec",
-			mcp.WithDescription("Run a command on a device as a plain subprocess (sh -c), wait for it to exit, and return its output. If the command does not exit within `timeout` seconds (default 30), the device kills its process group and returns timed_out=true with whatever output was captured. Returns {stdout, stderr, exit_code, timed_out, truncated}. For long-running or interactive work, run tmux through this tool."),
+			mcp.WithDescription("Run a command on a device as a plain subprocess via the device's shell (sh -c on Unix, cmd /c on Windows), wait for it to exit, and return its output. If the command does not exit within `timeout` seconds (default 30), the device kills its process group and returns timed_out=true with whatever output was captured. Returns {stdout, stderr, exit_code, timed_out, truncated}. For long-running or interactive work, run tmux through this tool."),
 			mcp.WithString("device", mcp.Required()),
-			mcp.WithString("cmd", mcp.Required(), mcp.Description("Shell command (passed to sh -c)")),
+			mcp.WithString("cmd", mcp.Required(), mcp.Description("Shell command (run by the device's shell: sh -c on Unix, cmd /c on Windows)")),
 			mcp.WithString("cwd"),
 			mcp.WithObject("env"),
 			mcp.WithNumber("timeout", mcp.Description("Seconds to wait before the device kills the command. Default 30.")),
@@ -65,7 +65,7 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 			defer c.rpc.Unregister(id)
 			if err := c.Send(&protocol.Exec{
 				MsgID: id, Target: device,
-				Cmd: []string{"sh", "-c", cmd}, Cwd: cwd, Env: envMap,
+				Cmd: cmd, Cwd: cwd, Env: envMap,
 				Timeout: timeoutSecs,
 			}); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
