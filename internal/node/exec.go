@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"time"
 
 	"github.com/qiuxiang/tether/internal/protocol"
@@ -54,14 +53,6 @@ func (w *cappedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// shellArgv wraps a shell command string in the node's native shell.
-func shellArgv(cmd string) []string {
-	if runtime.GOOS == "windows" {
-		return []string{"cmd", "/c", cmd}
-	}
-	return []string{"sh", "-c", cmd}
-}
-
 func mergeEnv(extra map[string]string) []string {
 	base := os.Environ()
 	for k, v := range extra {
@@ -82,11 +73,11 @@ func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	argv := shellArgv(m.Cmd)
-	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// newShellCmd builds the per-OS shell invocation (sh -c / cmd /c) with the
+	// right process-group attributes and command-line quoting.
+	c := newShellCmd(ctx, m.Cmd)
 	c.Dir = m.Cwd
 	c.Env = mergeEnv(m.Env)
-	c.SysProcAttr = childAttrExec()
 
 	stdout := &cappedBuffer{cap: execOutputCap}
 	stderr := &cappedBuffer{cap: execOutputCap}

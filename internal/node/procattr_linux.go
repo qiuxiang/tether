@@ -2,18 +2,24 @@
 
 package node
 
-import "syscall"
+import (
+	"context"
+	"os/exec"
+	"syscall"
+)
 
-func killGroup(pid int) {
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-}
-
-// childAttrExec returns SysProcAttr for plain exec children: a new process
-// group so killGroup can signal the whole group, plus Pdeathsig so a child
-// dies if the agent does.
-func childAttrExec() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
+// newShellCmd runs the command through `sh -c` in a new process group so
+// killGroup can signal the whole group; Pdeathsig kills the child if the agent
+// dies.
+func newShellCmd(ctx context.Context, command string) *exec.Cmd {
+	c := exec.CommandContext(ctx, "sh", "-c", command)
+	c.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid:   true,
 		Pdeathsig: syscall.SIGKILL,
 	}
+	return c
+}
+
+func killGroup(pid int) {
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
 }
