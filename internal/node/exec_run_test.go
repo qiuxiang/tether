@@ -4,6 +4,7 @@ package node
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -12,18 +13,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCappedBuffer(t *testing.T) {
-	w := &cappedBuffer{cap: 4}
-	n, err := w.Write([]byte("ab"))
+func TestReadCapped(t *testing.T) {
+	f, err := os.CreateTemp("", "rc-*")
 	require.NoError(t, err)
-	assert.Equal(t, 2, n)
-	assert.False(t, w.truncated)
+	defer os.Remove(f.Name())
+	defer f.Close()
+	_, err = f.WriteString("abcdef")
+	require.NoError(t, err)
 
-	n, err = w.Write([]byte("cdef"))
-	require.NoError(t, err)
-	assert.Equal(t, 4, n, "Write must report the full input length")
-	assert.Equal(t, "abcd", w.buf.String())
-	assert.True(t, w.truncated)
+	s, trunc := readCapped(f, 4)
+	assert.Equal(t, "abcd", s)
+	assert.True(t, trunc, "more than cap bytes must report truncated")
+
+	s, trunc = readCapped(f, 100)
+	assert.Equal(t, "abcdef", s)
+	assert.False(t, trunc)
 }
 
 func TestRunExecCapturesOutputAndExit(t *testing.T) {

@@ -1,10 +1,10 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"time"
@@ -28,31 +28,6 @@ type execResult struct {
 	Truncated bool
 }
 
-// cappedBuffer is an io.Writer that retains at most cap bytes and records
-// whether it had to drop any. Write always reports the full input length so
-// the process's write never sees a short write.
-type cappedBuffer struct {
-	buf       bytes.Buffer
-	cap       int
-	truncated bool
-}
-
-func (w *cappedBuffer) Write(p []byte) (int, error) {
-	room := w.cap - w.buf.Len()
-	switch {
-	case room <= 0:
-		if len(p) > 0 {
-			w.truncated = true
-		}
-	case len(p) <= room:
-		w.buf.Write(p)
-	default:
-		w.buf.Write(p[:room])
-		w.truncated = true
-	}
-	return len(p), nil
-}
-
 func mergeEnv(extra map[string]string) []string {
 	base := os.Environ()
 	for k, v := range extra {
@@ -61,10 +36,39 @@ func mergeEnv(extra map[string]string) []string {
 	return base
 }
 
+// readCapped reads at most capN bytes from the start of f, reporting whether
+// the file held more (i.e. output was truncated).
+func readCapped(f *os.File, capN int) (string, bool) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", false
+	}
+	buf := make([]byte, capN+1)
+	n := 0
+	for n < len(buf) {
+		r, err := f.Read(buf[n:])
+		n += r
+		if err != nil {
+			break
+		}
+	}
+	if n > capN {
+		return string(buf[:capN]), true
+	}
+	return string(buf[:n]), false
+}
+
 // runExec runs m.Cmd through the native shell to completion or until the
 // timeout, whichever comes first. On timeout the whole process group is
 // killed and TimedOut is set. The returned error is non-nil only when the
 // process failed to start at the OS level (e.g. a bad working directory).
+//
+// stdout/stderr are captured to temp files rather than pipes. On Windows a
+// grandchild (or conhost.exe) can inherit the write end of an os/exec pipe and
+// hold it open after the command itself exits, so the pipe never reaches EOF
+// and c.Wait() blocks forever — and closing the read end from another
+// goroutine does not unblock a pending ReadFile on Windows, so WaitDelay can't
+// rescue it. A real file handed straight to the child has no such drain step:
+// Wait returns as soon as the process exits, and we read the file afterward.
 func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 	timeout := defaultExecTimeout
 	if m.Timeout > 0 {
@@ -73,16 +77,26 @@ func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	outFile, err := os.CreateTemp("", "tether-exec-out-*")
+	if err != nil {
+		return execResult{}, err
+	}
+	defer os.Remove(outFile.Name())
+	defer outFile.Close()
+	errFile, err := os.CreateTemp("", "tether-exec-err-*")
+	if err != nil {
+		return execResult{}, err
+	}
+	defer os.Remove(errFile.Name())
+	defer errFile.Close()
+
 	// newShellCmd builds the per-OS shell invocation (sh -c / cmd /c) with the
 	// right process-group attributes and command-line quoting.
 	c := newShellCmd(ctx, m.Cmd)
 	c.Dir = m.Cwd
 	c.Env = mergeEnv(m.Env)
-
-	stdout := &cappedBuffer{cap: execOutputCap}
-	stderr := &cappedBuffer{cap: execOutputCap}
-	c.Stdout = stdout
-	c.Stderr = stderr
+	c.Stdout = outFile
+	c.Stderr = errFile
 
 	// On timeout, kill the whole process group so children don't outlive us.
 	// Set Cancel/WaitDelay before Start: Start spawns a goroutine that reads
@@ -91,28 +105,29 @@ func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 		killGroup(c.Process.Pid)
 		return nil
 	}
-	// If a grandchild keeps the output pipe open after the group is killed,
-	// don't let Wait hang forever.
+	// Backstop in case the killed process is slow to reap.
 	c.WaitDelay = 5 * time.Second
 
 	if err := c.Start(); err != nil {
 		return execResult{}, err
 	}
 
-	err := c.Wait()
+	waitErr := c.Wait()
 
+	stdout, outTrunc := readCapped(outFile, execOutputCap)
+	stderr, errTrunc := readCapped(errFile, execOutputCap)
 	res := execResult{
-		Stdout:    stdout.buf.String(),
-		Stderr:    stderr.buf.String(),
-		Truncated: stdout.truncated || stderr.truncated,
+		Stdout:    stdout,
+		Stderr:    stderr,
+		Truncated: outTrunc || errTrunc,
 	}
 	if ctx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
 	}
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if errors.As(waitErr, &exitErr) {
 		res.ExitCode = exitErr.ExitCode()
-	} else if err != nil {
+	} else if waitErr != nil {
 		res.ExitCode = -1
 	}
 	return res, nil

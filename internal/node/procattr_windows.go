@@ -10,6 +10,11 @@ import (
 	"syscall"
 )
 
+// createNoWindow keeps a console child from flashing a window on the desktop
+// when the node runs interactively. (The "exec never replies" hang is fixed by
+// capturing output to files in runExec, not here.)
+const createNoWindow = 0x08000000
+
 // newShellCmd runs the command through `cmd /c`. We set CmdLine explicitly so
 // the command reaches cmd verbatim: Go's default argument escaping mangles
 // metacharacters (| & < > ()) that live inside a quoted sub-argument such as a
@@ -22,7 +27,8 @@ func newShellCmd(ctx context.Context, command string) *exec.Cmd {
 	}
 	c := exec.CommandContext(ctx, shell)
 	c.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine: shell + ` /c "` + command + `"`,
+		CmdLine:       shell + ` /c "` + command + `"`,
+		CreationFlags: createNoWindow,
 	}
 	return c
 }
