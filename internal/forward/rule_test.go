@@ -42,14 +42,14 @@ func TestParseRule(t *testing.T) {
 func TestParseRuleErrors(t *testing.T) {
 	bad := []string{
 		"",
-		"X 1:a:2",                // unknown direction
-		"L only-two:fields",      // too few colons
-		"L 0:mac:5037",           // port 0
-		"L 65536:mac:5037",       // port out of range
-		"L abc:mac:5037",         // non-numeric port
-		"R mac:8080",             // missing dest port for R
-		"L 9000mac5037",          // no colons
-		"L 9000:mac:5037 extra",  // trailing junk
+		"X 1:a:2",               // unknown direction
+		"L only-two:fields",     // too few colons
+		"L 0:mac:5037",          // port 0
+		"L 65536:mac:5037",      // port out of range
+		"L abc:mac:5037",        // non-numeric port
+		"R mac:8080",            // missing dest port for R
+		"L 9000mac5037",         // no colons
+		"L 9000:mac:5037 extra", // trailing junk
 	}
 	for _, s := range bad {
 		t.Run(s, func(t *testing.T) {

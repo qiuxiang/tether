@@ -32,10 +32,10 @@ func NewServer(opts Options) *Server {
 	return s
 }
 
-func (s *Server) Registry() *Registry        { return s.registry }
-func (s *Server) Clients() *ClientRegistry   { return s.clients }
-func (s *Server) Router() *Router            { return s.router }
-func (s *Server) Forwards() *ForwardTable    { return s.forwards }
+func (s *Server) Registry() *Registry      { return s.registry }
+func (s *Server) Clients() *ClientRegistry { return s.clients }
+func (s *Server) Router() *Router          { return s.router }
+func (s *Server) Forwards() *ForwardTable  { return s.forwards }
 
 func (s *Server) broadcastDeviceEvent(kind, hostname string) {
 	ev := &protocol.Event{Kind: kind, Device: hostname}

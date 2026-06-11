@@ -14,7 +14,6 @@ import (
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
-
 // FileHandler manages in-flight uploads and downloads on a node.
 type FileHandler struct {
 	mu        sync.Mutex
