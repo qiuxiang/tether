@@ -20,6 +20,12 @@ jobs:
             goarch: arm64
           - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: windows
+            goarch: arm64
+            ext: .exe
     steps:
       - uses: actions/checkout@v4
 
@@ -31,9 +37,10 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          EXT: ${{ matrix.ext }}
           CGO_ENABLED: 0
         run: |
-          out="tether-${GOOS}-${GOARCH}"
+          out="tether-${GOOS}-${GOARCH}${EXT}"
           go build -trimpath -ldflags "-s -w" -o "$out" ./
           sha256sum "$out" > "$out.sha256"
 
@@ -41,8 +48,8 @@ jobs:
         with:
           name: tether-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            tether-${{ matrix.goos }}-${{ matrix.goarch }}
-            tether-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+            tether-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+            tether-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}.sha256
 
   release:
     needs: build
