@@ -15,10 +15,19 @@ const WSReadLimit int64 = 16 << 20 // 16 MiB
 // decMode forces untyped nested maps to decode as map[string]any so the result
 // round-trips through encoding/json. Without this, fxamacker defaults to
 // map[interface{}]interface{}, which json.Marshal silently fails on.
+//
+// UTF8DecodeInvalid keeps the decoder from rejecting strings that are not valid
+// UTF-8. exec stdout/stderr carry raw command output, which on Windows is in
+// the OEM/ANSI code page (e.g. GBK), not UTF-8. With the default
+// UTF8RejectInvalid the hub fails to decode such a Reply ("cbor: invalid UTF-8
+// string") and silently drops it, so the client's request hangs until timeout.
 var decMode cbor.DecMode
 
 func init() {
-	m, err := cbor.DecOptions{DefaultMapType: reflect.TypeOf(map[string]any{})}.DecMode()
+	m, err := cbor.DecOptions{
+		DefaultMapType: reflect.TypeOf(map[string]any{}),
+		UTF8:           cbor.UTF8DecodeInvalid,
+	}.DecMode()
 	if err != nil {
 		panic(err)
 	}
