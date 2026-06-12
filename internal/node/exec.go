@@ -38,9 +38,9 @@ func mergeEnv(extra map[string]string) []string {
 
 // readCapped reads at most capN bytes from the start of f, reporting whether
 // the file held more (i.e. output was truncated).
-func readCapped(f *os.File, capN int) (string, bool) {
+func readCapped(f *os.File, capN int) ([]byte, bool) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return "", false
+		return nil, false
 	}
 	buf := make([]byte, capN+1)
 	n := 0
@@ -52,9 +52,9 @@ func readCapped(f *os.File, capN int) (string, bool) {
 		}
 	}
 	if n > capN {
-		return string(buf[:capN]), true
+		return buf[:capN], true
 	}
-	return string(buf[:n]), false
+	return buf[:n], false
 }
 
 // runExec runs m.Cmd through the native shell to completion or until the
@@ -114,11 +114,11 @@ func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 
 	waitErr := c.Wait()
 
-	stdout, outTrunc := readCapped(outFile, execOutputCap)
-	stderr, errTrunc := readCapped(errFile, execOutputCap)
+	outBytes, outTrunc := readCapped(outFile, execOutputCap)
+	errBytes, errTrunc := readCapped(errFile, execOutputCap)
 	res := execResult{
-		Stdout:    stdout,
-		Stderr:    stderr,
+		Stdout:    toUTF8(outBytes),
+		Stderr:    toUTF8(errBytes),
 		Truncated: outTrunc || errTrunc,
 	}
 	if ctx.Err() == context.DeadlineExceeded {

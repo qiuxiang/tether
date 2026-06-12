@@ -22,11 +22,11 @@ func TestReadCapped(t *testing.T) {
 	require.NoError(t, err)
 
 	s, trunc := readCapped(f, 4)
-	assert.Equal(t, "abcd", s)
+	assert.Equal(t, "abcd", string(s))
 	assert.True(t, trunc, "more than cap bytes must report truncated")
 
 	s, trunc = readCapped(f, 100)
-	assert.Equal(t, "abcdef", s)
+	assert.Equal(t, "abcdef", string(s))
 	assert.False(t, trunc)
 }
 

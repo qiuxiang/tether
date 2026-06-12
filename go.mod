@@ -7,6 +7,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/mark3labs/mcp-go v0.54.0
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/text v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -19,5 +20,4 @@ require (
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/text v0.14.0 // indirect
 )
