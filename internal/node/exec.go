@@ -57,8 +57,8 @@ func readCapped(f *os.File, capN int) ([]byte, bool) {
 	return buf[:n], false
 }
 
-// runExec runs m.Cmd through the native shell to completion or until the
-// timeout, whichever comes first. On timeout the whole process group is
+// runExec spawns m.Args directly (no shell) and runs it to completion or until
+// the timeout, whichever comes first. On timeout the whole process group is
 // killed and TimedOut is set. The returned error is non-nil only when the
 // process failed to start at the OS level (e.g. a bad working directory).
 //
@@ -70,6 +70,9 @@ func readCapped(f *os.File, capN int) ([]byte, bool) {
 // rescue it. A real file handed straight to the child has no such drain step:
 // Wait returns as soon as the process exits, and we read the file afterward.
 func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
+	if len(m.Args) == 0 {
+		return execResult{}, errors.New("empty args")
+	}
 	timeout := defaultExecTimeout
 	if m.Timeout > 0 {
 		timeout = time.Duration(m.Timeout) * time.Second
@@ -90,9 +93,9 @@ func runExec(ctx context.Context, m *protocol.Exec) (execResult, error) {
 	defer os.Remove(errFile.Name())
 	defer errFile.Close()
 
-	// newShellCmd builds the per-OS shell invocation (sh -c / cmd /c) with the
-	// right process-group attributes and command-line quoting.
-	c := newShellCmd(ctx, m.Cmd)
+	// newProcessCmd builds the per-OS direct spawn with the right process-group
+	// attributes.
+	c := newProcessCmd(ctx, m.Args)
 	c.Dir = m.Cwd
 	c.Env = mergeEnv(m.Env)
 	c.Stdout = outFile

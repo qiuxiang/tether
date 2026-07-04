@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/qiuxiang/tether/internal/hub"
 	"github.com/qiuxiang/tether/internal/node"
 	"github.com/qiuxiang/tether/internal/protocol"
@@ -68,7 +69,7 @@ func TestExecEndToEnd(t *testing.T) {
 	require.NoError(t, c.Send(&protocol.Exec{
 		MsgID:   id,
 		Target:  "n1",
-		Cmd:     "echo hello",
+		Args:    []string{"echo", "hello"},
 		Timeout: 10,
 	}))
 
@@ -80,4 +81,19 @@ func TestExecEndToEnd(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("exec timed out")
 	}
+}
+
+// TestBashToolWrapsScript drives the bash MCP tool end-to-end: the script uses
+// a pipe, which only works if the tool wrapped it as ["bash","-c",script].
+func TestBashToolWrapsScript(t *testing.T) {
+	c, _, cleanup := setupClusterWithClient(t)
+	defer cleanup()
+
+	m := server.NewMCPServer("test", "0.0.0")
+	registerExecTools(m, c)
+	req := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bash","arguments":{"device":"n1","script":"echo bash_ok | tr a-z A-Z","timeout":10}}}`
+	resp := m.HandleMessage(context.Background(), []byte(req))
+	b, err := json.Marshal(resp)
+	require.NoError(t, err)
+	require.Contains(t, string(b), "BASH_OK")
 }

@@ -150,7 +150,7 @@ func TestRequestReplyRoundtrip(t *testing.T) {
 	s.Router().Register(msgID, capture, false)
 	defer s.Router().Unregister(msgID)
 
-	req := &protocol.Exec{MsgID: msgID, Cmd: "echo hello"}
+	req := &protocol.Exec{MsgID: msgID, Args: []string{"echo", "hello"}}
 	raw, err := protocol.Encode(req)
 	require.NoError(t, err)
 	require.NoError(t, dev.Conn.SendRaw(raw))

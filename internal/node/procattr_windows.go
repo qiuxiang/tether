@@ -4,7 +4,6 @@ package node
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
@@ -15,19 +14,12 @@ import (
 // capturing output to files in runExec, not here.)
 const createNoWindow = 0x08000000
 
-// newShellCmd runs the command through `cmd /c`. We set CmdLine explicitly so
-// the command reaches cmd verbatim: Go's default argument escaping mangles
-// metacharacters (| & < > ()) that live inside a quoted sub-argument such as a
-// PowerShell pipeline. Wrapping the whole command in one pair of quotes lets
-// cmd's /c quote-stripping rule hand the inner string to the program intact.
-func newShellCmd(ctx context.Context, command string) *exec.Cmd {
-	shell := os.Getenv("ComSpec")
-	if shell == "" {
-		shell = "cmd"
-	}
-	c := exec.CommandContext(ctx, shell)
+// newProcessCmd spawns args directly (no shell). Go's standard argument
+// escaping is correct here because each argument reaches the program as its
+// own argv entry — no cmd metacharacter or quote-stripping rules apply.
+func newProcessCmd(ctx context.Context, args []string) *exec.Cmd {
+	c := exec.CommandContext(ctx, args[0], args[1:]...)
 	c.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine:       shell + ` /c "` + command + `"`,
 		CreationFlags: createNoWindow,
 	}
 	return c

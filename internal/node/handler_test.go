@@ -38,7 +38,7 @@ func TestHandleExec(t *testing.T) {
 	s := &captureSender{msgs: make(chan protocol.Message, 8)}
 	h.Handle(context.Background(), s, &protocol.Exec{
 		MsgID: "e1",
-		Cmd:   "echo hi; echo bad 1>&2; exit 2",
+		Args:  []string{"sh", "-c", "echo hi; echo bad 1>&2; exit 2"},
 	})
 	r := awaitReply(t, s.msgs)
 	if !r.OK {

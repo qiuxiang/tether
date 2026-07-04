@@ -19,7 +19,9 @@ import (
 // then run on the device:  node_windows_test.exe -test.run TestWin -test.v
 
 func TestWinExecEchoAndExit(t *testing.T) {
-	res, err := runExec(context.Background(), &protocol.Exec{Cmd: "echo hi & exit 7"})
+	res, err := runExec(context.Background(), &protocol.Exec{
+		Args: []string{"cmd", "/c", "echo hi & exit 7"},
+	})
 	require.NoError(t, err)
 	assert.Contains(t, res.Stdout, "hi")
 	assert.Equal(t, 7, res.ExitCode)
@@ -27,7 +29,9 @@ func TestWinExecEchoAndExit(t *testing.T) {
 }
 
 func TestWinExecStderr(t *testing.T) {
-	res, err := runExec(context.Background(), &protocol.Exec{Cmd: "echo oops 1>&2"})
+	res, err := runExec(context.Background(), &protocol.Exec{
+		Args: []string{"cmd", "/c", "echo oops 1>&2"},
+	})
 	require.NoError(t, err)
 	assert.Contains(t, res.Stderr, "oops")
 	assert.False(t, res.TimedOut)
@@ -39,7 +43,7 @@ func TestWinExecStderr(t *testing.T) {
 func TestWinExecTimeoutKills(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd:     "ping -n 30 127.0.0.1",
+		Args:    []string{"ping", "-n", "30", "127.0.0.1"},
 		Timeout: 1,
 	})
 	require.NoError(t, err)
@@ -55,7 +59,10 @@ func TestWinExecTimeoutActuallyKills(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "marker.txt")
 	cmd := `ping -n 7 127.0.0.1 >NUL & echo done > "` + marker + `"`
 	start := time.Now()
-	res, err := runExec(context.Background(), &protocol.Exec{Cmd: cmd, Timeout: 1})
+	res, err := runExec(context.Background(), &protocol.Exec{
+		Args:    []string{"cmd", "/c", cmd},
+		Timeout: 1,
+	})
 	require.NoError(t, err)
 	assert.True(t, res.TimedOut, "expected timed_out=true")
 	assert.Less(t, time.Since(start), 10*time.Second)
@@ -72,7 +79,7 @@ func TestWinExecTimeoutActuallyKills(t *testing.T) {
 func TestWinExecLingeringChild(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd:     "start /b ping -n 30 127.0.0.1",
+		Args:    []string{"cmd", "/c", "start /b ping -n 30 127.0.0.1"},
 		Timeout: 20,
 	})
 	require.NoError(t, err)
@@ -85,7 +92,7 @@ func TestWinExecLingeringChild(t *testing.T) {
 func TestWinExecPowershell(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd:     "powershell -NoProfile -Command Write-Output marker123",
+		Args:    []string{"powershell", "-NoProfile", "-Command", "Write-Output marker123"},
 		Timeout: 25,
 	})
 	require.NoError(t, err)
@@ -94,16 +101,16 @@ func TestWinExecPowershell(t *testing.T) {
 	assert.Less(t, time.Since(start), 15*time.Second, "must return promptly")
 }
 
-// TestWinExecQuotedArg checks that a single double-quoted argument survives the
-// cmd /c wrapping (the field hit garbled output for quoted PowerShell).
+// TestWinExecQuotedArg checks that an argument with spaces and embedded quotes
+// reaches the program as a single argv entry under direct spawn.
 func TestWinExecQuotedArg(t *testing.T) {
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd:     `powershell -NoProfile -Command "Write-Output quoted_ok"`,
+		Args:    []string{"powershell", "-NoProfile", "-Command", `Write-Output "quoted ok"`},
 		Timeout: 25,
 	})
 	require.NoError(t, err)
 	assert.False(t, res.TimedOut)
-	assert.Contains(t, res.Stdout, "quoted_ok")
+	assert.Contains(t, res.Stdout, "quoted ok")
 }
 
 // --- The exact commands that hung in the field, run directly via runExec. ---
@@ -112,7 +119,9 @@ func TestWinExecQuotedArg(t *testing.T) {
 
 func TestWinFieldVer(t *testing.T) {
 	start := time.Now()
-	res, err := runExec(context.Background(), &protocol.Exec{Cmd: "ver", Timeout: 8})
+	res, err := runExec(context.Background(), &protocol.Exec{
+		Args: []string{"cmd", "/c", "ver"}, Timeout: 8,
+	})
 	require.NoError(t, err)
 	t.Logf("ver: elapsed=%v timedout=%v exit=%d stdout=%q stderr=%q",
 		time.Since(start), res.TimedOut, res.ExitCode, res.Stdout, res.Stderr)
@@ -123,7 +132,7 @@ func TestWinFieldVer(t *testing.T) {
 func TestWinFieldWmic(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd: "wmic os get Caption /value", Timeout: 12,
+		Args: []string{"wmic", "os", "get", "Caption", "/value"}, Timeout: 12,
 	})
 	require.NoError(t, err)
 	t.Logf("wmic: elapsed=%v timedout=%v exit=%d stdout=%q stderr=%q",
@@ -134,19 +143,21 @@ func TestWinFieldWmic(t *testing.T) {
 func TestWinFieldSysteminfo(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd: "systeminfo", Timeout: 40,
+		Args: []string{"systeminfo"}, Timeout: 40,
 	})
 	require.NoError(t, err)
 	t.Logf("systeminfo: elapsed=%v timedout=%v exit=%d len(stdout)=%d",
 		time.Since(start), res.TimedOut, res.ExitCode, len(res.Stdout))
 }
 
-// Quoted powershell with cmd metacharacters (| ; ()) — the config-dump case
-// that came back garbled in the field.
+// A PowerShell pipeline with metacharacters (| and spaces) passed as one argv
+// entry — the config-dump case that came back garbled under the old cmd /c
+// quoting hack. Direct spawn must hand it to powershell intact.
 func TestWinFieldPowershellCim(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd:     `powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption"`,
+		Args: []string{"powershell", "-NoProfile", "-Command",
+			"Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption"},
 		Timeout: 25,
 	})
 	require.NoError(t, err)

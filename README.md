@@ -42,7 +42,7 @@ Put nginx/caddy in front of port 7000 for TLS. The hub serves three paths:
 ./tether join
 ```
 
-The node will connect, register, and accept commands from the hub. Commands are run as plain subprocesses via the node's native shell (`sh -c` on Unix, `cmd /c` on Windows); for long-running or interactive work, run `tmux` through the `exec` tool.
+The node will connect, register, and accept commands from the hub. Commands are spawned directly as plain subprocesses from a structured argv (no shell involved); shell syntax is available through the `bash` tool, which requires bash on the device's PATH. For long-running or interactive work, run `tmux` through the `exec` tool.
 
 ## Run the MCP client (your local machine)
 
@@ -65,20 +65,31 @@ The `tether mcp` subcommand runs a stdio MCP server that holds an outbound WSS c
 }
 ```
 
-6 tools become available: `list_devices`, `exec`, `file_transfer`, `read_file`, `write_file`, `edit_file`.
+7 tools become available: `list_devices`, `exec`, `bash`, `file_transfer`, `read_file`, `write_file`, `edit_file`.
 
 ### exec
 
-Runs a shell command on a device as a plain subprocess (`sh -c` on Unix, `cmd /c` on Windows), waits for it to exit, and returns its output:
+Runs an executable on a device as a plain subprocess spawned directly from a structured argv — no shell is involved, so pipes, globs, redirections and `&&` are not interpreted (use `bash` for those). Waits for it to exit and returns its output:
 
 ```
-exec(device, cmd, cwd?, env?, timeout?=30)
+exec(device, name, args?, cwd?, env?, timeout?=30)
   → {stdout, stderr, exit_code, timed_out, truncated}
 ```
 
 If the command does not finish within `timeout` seconds (default 30), the node kills the whole process group and returns `timed_out=true` with whatever output was captured so far. Each of `stdout` and `stderr` is capped at 4 MiB; if either is truncated, `truncated=true` is set.
 
 For long-running or interactive work, run `tmux` through this tool — e.g. `tmux new-session -d -s foo 'long-running-cmd'` to start a session, `tmux capture-pane -pt foo` to read its output, and `tmux send-keys -t foo 'r' Enter` to send keystrokes.
+
+### bash
+
+Runs a shell script on a device via `bash -c`; use this for pipes, globs, redirections and other shell syntax. Requires bash on the device's PATH (on Windows install Git Bash or MSYS and add it to PATH):
+
+```
+bash(device, script, cwd?, env?, timeout?=30)
+  → {stdout, stderr, exit_code, timed_out, truncated}
+```
+
+Timeout and output semantics are identical to `exec`.
 
 ### file_transfer
 

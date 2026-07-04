@@ -32,7 +32,7 @@ func TestReadCapped(t *testing.T) {
 
 func TestRunExecCapturesOutputAndExit(t *testing.T) {
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd: "echo out; echo err 1>&2; exit 7",
+		Args: []string{"sh", "-c", "echo out; echo err 1>&2; exit 7"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "out\n", res.Stdout)
@@ -42,10 +42,21 @@ func TestRunExecCapturesOutputAndExit(t *testing.T) {
 	assert.False(t, res.Truncated)
 }
 
+// TestRunExecNoShell verifies args are spawned directly: a shell would treat
+// `|` as a pipe, but as a plain argv entry it must come back verbatim.
+func TestRunExecNoShell(t *testing.T) {
+	res, err := runExec(context.Background(), &protocol.Exec{
+		Args: []string{"echo", "a|b"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "a|b\n", res.Stdout)
+	assert.Equal(t, 0, res.ExitCode)
+}
+
 func TestRunExecTimeoutKills(t *testing.T) {
 	start := time.Now()
 	res, err := runExec(context.Background(), &protocol.Exec{
-		Cmd:     "echo started; sleep 30",
+		Args:    []string{"sh", "-c", "echo started; sleep 30"},
 		Timeout: 1,
 	})
 	require.NoError(t, err)
@@ -56,8 +67,13 @@ func TestRunExecTimeoutKills(t *testing.T) {
 
 func TestRunExecStartError(t *testing.T) {
 	_, err := runExec(context.Background(), &protocol.Exec{
-		Cmd: "true",
-		Cwd: "/no/such/directory/exists",
+		Args: []string{"true"},
+		Cwd:  "/no/such/directory/exists",
 	})
 	require.Error(t, err, "a bad working directory must surface as a start error")
+}
+
+func TestRunExecEmptyArgs(t *testing.T) {
+	_, err := runExec(context.Background(), &protocol.Exec{})
+	require.Error(t, err, "empty args must be rejected")
 }

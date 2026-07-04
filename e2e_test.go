@@ -54,7 +54,7 @@ func TestE2EExec(t *testing.T) {
 	require.NoError(t, c.Send(&protocol.Exec{
 		MsgID:  id,
 		Target: "e2e-host",
-		Cmd:    "echo hello; echo oops 1>&2; exit 3",
+		Args:   []string{"sh", "-c", "echo hello; echo oops 1>&2; exit 3"},
 	}))
 
 	var reply *protocol.Reply
@@ -101,7 +101,7 @@ func TestE2EExecTimeout(t *testing.T) {
 	require.NoError(t, c.Send(&protocol.Exec{
 		MsgID:   id,
 		Target:  "e2e-host",
-		Cmd:     "echo started; sleep 30",
+		Args:    []string{"sh", "-c", "echo started; sleep 30"},
 		Timeout: 1,
 	}))
 

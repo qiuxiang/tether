@@ -1,7 +1,7 @@
 package protocol
 
-// Exec — client → hub → node. Runs Cmd through the node's shell (`sh -c` on
-// Unix, `cmd /c` on Windows) as a plain subprocess, waits for it to exit (or
+// Exec — client → hub → node. Spawns Args directly as a plain subprocess
+// (argv[0] resolved via PATH, no shell involved), waits for it to exit (or
 // until Timeout seconds elapse, default 30, after which the node kills the
 // process group), and returns the result in a single Reply.
 // Reply.Data: {stdout string, stderr string, exit_code int, timed_out bool,
@@ -10,7 +10,7 @@ type Exec struct {
 	Type    string            `cbor:"type"`
 	MsgID   string            `cbor:"msg_id"`
 	Target  string            `cbor:"target,omitempty"`
-	Cmd     string            `cbor:"cmd"`
+	Args    []string          `cbor:"args"`
 	Cwd     string            `cbor:"cwd,omitempty"`
 	Env     map[string]string `cbor:"env,omitempty"`
 	Timeout int               `cbor:"timeout,omitempty"`

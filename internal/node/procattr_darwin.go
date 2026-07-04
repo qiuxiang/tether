@@ -8,10 +8,10 @@ import (
 	"syscall"
 )
 
-// newShellCmd runs the command through `sh -c` in a new process group so
+// newProcessCmd spawns args directly (no shell) in a new process group so
 // killGroup can signal the whole group.
-func newShellCmd(ctx context.Context, command string) *exec.Cmd {
-	c := exec.CommandContext(ctx, "sh", "-c", command)
+func newProcessCmd(ctx context.Context, args []string) *exec.Cmd {
+	c := exec.CommandContext(ctx, args[0], args[1:]...)
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return c
 }
