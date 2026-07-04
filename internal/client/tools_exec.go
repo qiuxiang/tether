@@ -41,12 +41,12 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 
 	m.AddTool(
 		mcp.NewTool("exec",
-			mcp.WithDescription("Run an executable on a device as a plain subprocess, wait for it to exit, and return its output. The process is spawned directly from name+args — no shell is involved, so pipes, globs, redirections, `&&` etc. are not interpreted (use the bash tool for those). If the command does not exit within `timeout` seconds (default 30), the device kills its process group and returns timed_out=true with whatever output was captured. Returns {stdout, stderr, exit_code, timed_out, truncated}. For long-running or interactive work, run tmux through this tool."),
-			mcp.WithString("device", mcp.Required()),
+			mcp.WithDescription("Run an executable on a device as a plain subprocess, wait for it to exit, and return its output. The process is spawned directly from name+args — no shell is involved, so pipes, globs, redirections, `&&` etc. are not interpreted (use the bash tool for those). If the command does not exit within `timeout` seconds (default 30), the device kills its process group and returns timed_out=true with whatever output was captured. Returns {stdout, stderr, exit_code, timed_out, truncated}. For long-running work, launch it under a detached tmux/screen session (via the bash tool) so it outlives the timeout, then reattach or poll later."),
+			mcp.WithString("device", mcp.Required(), mcp.Description("Target device hostname, as shown by list_devices")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Executable name (resolved via the device's PATH) or absolute path")),
 			mcp.WithArray("args", mcp.Description("Argument list passed to the executable verbatim"), mcp.WithStringItems()),
-			mcp.WithString("cwd"),
-			mcp.WithObject("env"),
+			mcp.WithString("cwd", mcp.Description("Working directory for the process, as a native OS path (defaults to the node's own working directory)")),
+			mcp.WithObject("env", mcp.Description("Extra environment variables merged into the device's environment; keys that already exist are overridden")),
 			mcp.WithNumber("timeout", mcp.Description("Seconds to wait before the device kills the command. Default 30.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -59,11 +59,11 @@ func registerExecTools(m *server.MCPServer, c *Conn) {
 
 	m.AddTool(
 		mcp.NewTool("bash",
-			mcp.WithDescription("Run a shell script on a device via bash (`bash -c script`), wait for it to exit, and return its output. Use this for pipes, globs, redirections, `&&` and other shell syntax. Requires bash on the device's PATH (on Windows install Git Bash or MSYS and add it to PATH). Timeout/output semantics are identical to the exec tool. Returns {stdout, stderr, exit_code, timed_out, truncated}."),
-			mcp.WithString("device", mcp.Required()),
+			mcp.WithDescription("Run a shell script on a device via bash (`bash -c script`), wait for it to exit, and return its output. Use this for pipes, globs, redirections, `&&` and other shell syntax. Requires bash on the device's PATH (on Windows install Git Bash or MSYS and add it to PATH); note that under MSYS/Git Bash the script sees MSYS-mapped paths (e.g. /c/Users/... rather than C:\\Users\\...), unlike the exec tool which uses native paths. Timeout/output semantics are identical to the exec tool. Returns {stdout, stderr, exit_code, timed_out, truncated}."),
+			mcp.WithString("device", mcp.Required(), mcp.Description("Target device hostname, as shown by list_devices")),
 			mcp.WithString("script", mcp.Required(), mcp.Description("Shell script passed to bash -c")),
-			mcp.WithString("cwd"),
-			mcp.WithObject("env"),
+			mcp.WithString("cwd", mcp.Description("Working directory for the process, as a native OS path (defaults to the node's own working directory)")),
+			mcp.WithObject("env", mcp.Description("Extra environment variables merged into the device's environment; keys that already exist are overridden")),
 			mcp.WithNumber("timeout", mcp.Description("Seconds to wait before the device kills the command. Default 30.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
