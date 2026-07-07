@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/qiuxiang/tether/internal/config"
 	"github.com/qiuxiang/tether/internal/node"
+	svc "github.com/qiuxiang/tether/internal/service"
 )
 
 func Join(args []string, stderr io.Writer) int {
@@ -49,10 +48,13 @@ func Join(args []string, stderr io.Writer) int {
 	})
 	cli.SetHandler(ph)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	cli.Run(ctx)
-	ph.Shutdown()
+	run := func(ctx context.Context) { cli.Run(ctx) }
+	shutdown := func() { ph.Shutdown() }
+
+	if err := svc.Run(run, shutdown); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	return 0
 }
 

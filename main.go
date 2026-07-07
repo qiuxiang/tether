@@ -12,7 +12,7 @@ func main() { os.Exit(run(os.Args, os.Stderr)) }
 
 func run(args []string, stderr io.Writer) int {
 	if len(args) < 2 {
-		fmt.Fprintln(stderr, "usage: tether <serve|join|mcp> [flags]")
+		fmt.Fprintln(stderr, "usage: tether <serve|join|mcp|service> [flags]")
 		return 2
 	}
 	switch args[1] {
@@ -22,6 +22,8 @@ func run(args []string, stderr io.Writer) int {
 		return cli.Join(args[2:], stderr)
 	case "mcp":
 		return cli.MCP(args[2:], stderr)
+	case "service":
+		return cli.Service(args[2:], stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown subcommand: %s\n", args[1])
 		return 2
