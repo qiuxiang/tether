@@ -91,11 +91,3 @@ func (r *Router) ForwardToNode(msgID string, raw []byte) bool {
 	}
 	return true
 }
-
-// Lookup returns the full route for msg_id. Used by relay coordinator.
-func (r *Router) Lookup(msgID string) (route, bool) {
-	r.mu.Lock()
-	rt, ok := r.routes[msgID]
-	r.mu.Unlock()
-	return rt, ok
-}

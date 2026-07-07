@@ -123,20 +123,6 @@ func (s *deviceSession) SendRaw(raw []byte) error {
 	return s.conn.Write(ctx, websocket.MessageBinary, raw)
 }
 
-// Send is retained for in-process call sites in hub package; encodes then
-// forwards to SendRaw.
-func (s *deviceSession) Send(msg any) error {
-	m, ok := msg.(protocol.Message)
-	if !ok {
-		return errAuth("not a protocol.Message")
-	}
-	raw, err := protocol.Encode(m)
-	if err != nil {
-		return err
-	}
-	return s.SendRaw(raw)
-}
-
 func (s *deviceSession) run(ctx context.Context) {
 	for {
 		_, raw, err := s.conn.Read(ctx)
@@ -202,28 +188,14 @@ func (s *deviceSession) run(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			// Route to the opposite side of the stream.
-			if s == client {
-				if node != nil {
-					_ = node.SendRaw(raw)
-				}
-			} else {
-				_ = client.SendRaw(raw)
-			}
+			s.forwardToPeer(client, node, raw)
 			continue
 		case *protocol.ForwardClose:
 			client, node, ok := s.server.forwards.LookupStream(v.StreamID)
 			if !ok {
 				continue
 			}
-			// Route to the opposite side of the stream.
-			if s == client {
-				if node != nil {
-					_ = node.SendRaw(raw)
-				}
-			} else {
-				_ = client.SendRaw(raw)
-			}
+			s.forwardToPeer(client, node, raw)
 			if v.Half == "" || v.Half == "both" {
 				s.server.forwards.CloseStream(v.StreamID)
 			}
@@ -241,6 +213,19 @@ func (s *deviceSession) run(ctx context.Context) {
 				s.router.Unregister(id)
 			}
 		}
+	}
+}
+
+// forwardToPeer relays a forward frame to the opposite side of the stream:
+// if this session is the client end, send to the node; otherwise send to the
+// client.
+func (s *deviceSession) forwardToPeer(client, node PeerConn, raw []byte) {
+	if s == client {
+		if node != nil {
+			_ = node.SendRaw(raw)
+		}
+	} else {
+		_ = client.SendRaw(raw)
 	}
 }
 

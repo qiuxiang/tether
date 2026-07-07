@@ -1,8 +1,6 @@
 package client
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"sync"
 
 	"github.com/qiuxiang/tether/internal/protocol"
@@ -21,11 +19,7 @@ func NewRPC() *RPC {
 	}
 }
 
-func NewMsgID() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
-}
+func NewMsgID() string { return protocol.NewID(8) }
 
 func (r *RPC) Register(msgID string) chan *protocol.Reply {
 	return r.RegisterBuf(msgID, 1)
@@ -90,10 +84,4 @@ func (r *RPC) Deliver(msg protocol.Message) {
 			r.Unregister(m.MsgID)
 		}
 	}
-}
-
-// RegisterStreamRaw is an alias for RegisterStream — kept for naming
-// clarity in callers that consume FileChunk/FileAbort streams.
-func (r *RPC) RegisterStreamRaw(msgID string) chan protocol.Message {
-	return r.RegisterStream(msgID)
 }

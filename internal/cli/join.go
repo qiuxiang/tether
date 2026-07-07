@@ -15,13 +15,9 @@ import (
 func Join(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("join", flag.ContinueOnError)
 	configPath := fs.String("config", expandHome("~/.config/tether/config.yaml"), "Path to config")
-	once := fs.Bool("once", false, "Run a single connection attempt and exit")
-	tail := fs.Bool("tail", false, "Print inbound/outbound frames to stderr")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	_ = once
-	_ = tail // wired in by the engineer if desired
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintln(stderr, err)

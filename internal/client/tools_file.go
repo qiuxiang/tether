@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -179,7 +178,7 @@ func download(ctx context.Context, c *Conn, node, remotePath, localPath string, 
 
 	id := NewMsgID()
 	replyCh := c.rpc.Register(id)
-	streamCh := c.rpc.RegisterStreamRaw(id)
+	streamCh := c.rpc.RegisterStream(id)
 	defer c.rpc.Unregister(id)
 	start := time.Now()
 	if err := c.Send(&protocol.FileGetOpen{MsgID: id, Target: node, Path: remotePath}); err != nil {
@@ -312,6 +311,3 @@ func finalResult(reply *protocol.Reply, start time.Time) *mcp.CallToolResult {
 	b, _ := json.Marshal(out)
 	return mcp.NewToolResultText(string(b))
 }
-
-// silence unused imports until callers stabilize
-var _ = errors.New

@@ -2,8 +2,6 @@ package hub
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -15,11 +13,7 @@ import (
 	"github.com/qiuxiang/tether/internal/protocol"
 )
 
-func newClientID() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
-}
+func newClientID() string { return protocol.NewID(8) }
 
 func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -107,9 +101,9 @@ func (cs *clientSession) dispatch(raw []byte, msg protocol.Message) {
 	case *protocol.Exec:
 		cs.routeOneShot(m.MsgID, m.Target, raw)
 	case *protocol.FilePutOpen:
-		cs.routeFilePut(m.MsgID, m.Target, raw)
+		cs.routeFileStream(m.MsgID, m.Target, raw)
 	case *protocol.FileGetOpen:
-		cs.routeFileGet(m.MsgID, m.Target, raw)
+		cs.routeFileStream(m.MsgID, m.Target, raw)
 	case *protocol.FileLocalCopy:
 		cs.routeOneShot(m.MsgID, m.Target, raw)
 	case *protocol.FileChunk:
@@ -170,16 +164,12 @@ func (cs *clientSession) routeTo(msgID, target string, raw []byte, sticky bool) 
 	}
 	cs.server.router.Register(msgID, cs, sticky)
 	if sticky {
-		cs.mu.Lock()
-		cs.pending[msgID] = struct{}{}
-		cs.mu.Unlock()
+		cs.trackPending(msgID)
 	}
 	if err := d.Conn.SendRaw(raw); err != nil {
 		cs.server.router.Unregister(msgID)
 		if sticky {
-			cs.mu.Lock()
-			delete(cs.pending, msgID)
-			cs.mu.Unlock()
+			cs.untrackPending(msgID)
 		}
 		return err
 	}
@@ -207,34 +197,18 @@ func (cs *clientSession) untrackPending(msgID string) {
 	cs.mu.Unlock()
 }
 
-func (cs *clientSession) routeFilePut(msgID, target string, raw []byte) {
+// routeFileStream sets up a sticky bidirectional route for a file put/get:
+// Reply frames flow node→client, while FileChunk/FileAbort frames flow
+// client→node (RegisterNode). Sticky until EOF; tracked so a client
+// disconnect unregisters the route.
+func (cs *clientSession) routeFileStream(msgID, target string, raw []byte) {
 	d, ok := cs.server.registry.Get(target)
 	if !ok || d.Conn == nil {
 		cs.sendErrorReply(msgID, fmt.Errorf("device_offline: %s", target))
 		return
 	}
-	// sticky=true: both the ok-to-send Reply and the final Reply must flow back
-	// to the client; the route must also survive so that FileChunk frames sent by
-	// the client (ForwardToNode) can be forwarded to the node.
 	cs.server.router.Register(msgID, cs, true)
-	cs.server.router.RegisterNode(msgID, d.Conn) // chunks flow client → node
-	cs.trackPending(msgID)
-	if err := d.Conn.SendRaw(raw); err != nil {
-		cs.server.router.Unregister(msgID)
-		cs.untrackPending(msgID)
-		cs.sendErrorReply(msgID, err)
-	}
-}
-
-func (cs *clientSession) routeFileGet(msgID, target string, raw []byte) {
-	d, ok := cs.server.registry.Get(target)
-	if !ok || d.Conn == nil {
-		cs.sendErrorReply(msgID, fmt.Errorf("device_offline: %s", target))
-		return
-	}
-	// metadata Reply + chunk stream all flow node→client; sticky until EOF.
-	cs.server.router.Register(msgID, cs, true)
-	cs.server.router.RegisterNode(msgID, d.Conn) // for client→node abort frames
+	cs.server.router.RegisterNode(msgID, d.Conn)
 	cs.trackPending(msgID)
 	if err := d.Conn.SendRaw(raw); err != nil {
 		cs.server.router.Unregister(msgID)

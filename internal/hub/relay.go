@@ -260,35 +260,6 @@ func (r *relaySourceInterceptor) forwardFrame(raw []byte) error {
 	return nil
 }
 
-// chunkRewriter rewrites incoming FileChunk/FileAbort msg_ids and forwards
-// them to the destination node.
-type chunkRewriter struct {
-	toConn  PeerConn
-	toMsgID string
-}
-
-func (cr *chunkRewriter) SendRaw(raw []byte) error {
-	msg, err := protocol.Decode(raw)
-	if err != nil {
-		return err
-	}
-	switch m := msg.(type) {
-	case *protocol.FileChunk:
-		m.MsgID = cr.toMsgID
-		out, err := protocol.Encode(m)
-		if err != nil {
-			return err
-		}
-		return cr.toConn.SendRaw(out)
-	case *protocol.FileAbort:
-		m.MsgID = cr.toMsgID
-		out, _ := protocol.Encode(m)
-		return cr.toConn.SendRaw(out)
-	}
-	return nil
-}
-func (cr *chunkRewriter) Close() {}
-
 // finalDeliverer forwards the final upload Reply back to the originating
 // client under the client's outer msg_id.
 type finalDeliverer struct {

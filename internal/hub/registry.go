@@ -12,10 +12,6 @@ type PeerConn interface {
 	Close()
 }
 
-// DeviceConn is kept as an alias for backwards compatibility within the package.
-// New code should use PeerConn.
-type DeviceConn = PeerConn
-
 type Device struct {
 	Hostname     string
 	OS           string

@@ -26,23 +26,6 @@ func TestReplyInterceptorDecodes(t *testing.T) {
 	require.NoError(t, i.SendRaw(raw2))
 }
 
-func TestChunkRewriterRewritesMsgID(t *testing.T) {
-	dst := &fakeConn{}
-	cr := &chunkRewriter{toConn: dst, toMsgID: "NEW"}
-
-	in := &protocol.FileChunk{MsgID: "OLD", Seq: 1, Data: []byte("hi"), EOF: false}
-	raw, _ := protocol.Encode(in)
-	require.NoError(t, cr.SendRaw(raw))
-	require.Len(t, dst.sent, 1)
-
-	decoded, err := protocol.Decode(dst.sent[0])
-	require.NoError(t, err)
-	out := decoded.(*protocol.FileChunk)
-	require.Equal(t, "NEW", out.MsgID)
-	require.Equal(t, int64(1), out.Seq)
-	require.Equal(t, []byte("hi"), out.Data)
-}
-
 // TestRelaySourceInterceptorBuffersChunksUntilDestinationReady covers the
 // race that previously dropped FileChunks: a fast source pushes the metadata
 // Reply and chunks back-to-back before the hub has learned the destination's

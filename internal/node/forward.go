@@ -2,8 +2,6 @@ package node
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -80,18 +78,6 @@ func (h *ForwardHandler) Start(ctx context.Context, send Sender) {
 		case forward.DirLocal:
 			h.startLocal(ctx, send, r)
 		case forward.DirRemote:
-			h.resendRemote(send, r)
-		}
-	}
-}
-
-// ResendListens re-emits forward_listen for all R rules.
-func (h *ForwardHandler) ResendListens(send Sender) {
-	h.mu.Lock()
-	rules := append([]forward.Rule(nil), h.rules...)
-	h.mu.Unlock()
-	for _, r := range rules {
-		if r.Dir == forward.DirRemote {
 			h.resendRemote(send, r)
 		}
 	}
@@ -440,8 +426,4 @@ func (h *ForwardHandler) readPump(send Sender, sid string, conn net.Conn) {
 	}
 }
 
-func newStreamID() string {
-	b := make([]byte, 12)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
+func newStreamID() string { return protocol.NewID(12) }
